@@ -4,9 +4,36 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.jojo.framework</groupId>
-    <artifactId>EasyDynamodb</artifactId>
+    <groupId>games.jojocat.framework</groupId>
+    <artifactId>easy-dynamodb</artifactId>
     <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>EasyDynamodb</name>
+    <description>Lightweight Java DynamoDB library. Annotation-driven, zero config, one DDM class for all CRUD operations.</description>
+    <url>https://github.com/game-ark/easy-dynamodb</url>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>JojoCat</name>
+            <email>hcxohan@gmail.com</email>
+            <organization>JojoCat Games</organization>
+            <organizationUrl>https://jojocat.games</organizationUrl>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:git://github.com/game-ark/easy-dynamodb.git</connection>
+        <developerConnection>scm:git:ssh://github.com:game-ark/easy-dynamodb.git</developerConnection>
+        <url>https://github.com/game-ark/easy-dynamodb</url>
+    </scm>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -41,6 +68,67 @@
                     <source>21</source>
                     <target>21</target>
                     <release>21</release>
+                </configuration>
+            </plugin>
+
+            <!-- Source JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals>
+                            <goal>jar-no-fork</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Javadoc JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>3.10.1</version>
+                <configuration>
+                    <doclint>none</doclint>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- GPG Signing -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>3.2.7</version>
+                <executions>
+                    <execution>
+                        <id>sign-artifacts</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>sign</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Central Publishing (sonatype) -->
+            <plugin>
+                <groupId>org.sonatype.central</groupId>
+                <artifactId>central-publishing-maven-plugin</artifactId>
+                <version>0.6.0</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <publishingServerId>central</publishingServerId>
+                    <autoPublish>true</autoPublish>
                 </configuration>
             </plugin>
         </plugins>

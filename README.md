@@ -25,8 +25,8 @@ ddm.saveBatch(userList);                           // Batch save
 
 ```xml
 <dependency>
-    <groupId>com.jojo.framework</groupId>
-    <artifactId>EasyDynamodb</artifactId>
+    <groupId>games.jojocat.framework</groupId>
+    <artifactId>easy-dynamodb</artifactId>
     <version>1.0.0</version>
 </dependency>
 ```
