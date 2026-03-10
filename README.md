@@ -50,7 +50,7 @@ EasyDynamodb is ideal for projects that want DynamoDB without the boilerplate. I
 <dependency>
     <groupId>games.jojocat.framework</groupId>
     <artifactId>easy-dynamodb</artifactId>
-    <version>1.0.2</version>
+    <version>1.0.1</version>
 </dependency>
 ```
 

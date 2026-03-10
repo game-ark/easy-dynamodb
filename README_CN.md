@@ -50,7 +50,7 @@ EasyDynamodb 适合希望快速使用 DynamoDB 而不想写大量样板代码的
 <dependency>
     <groupId>games.jojocat.framework</groupId>
     <artifactId>easy-dynamodb</artifactId>
-    <version>1.0.2</version>
+    <version>1.0.1</version>
 </dependency>
 ```
 
