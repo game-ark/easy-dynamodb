@@ -4,6 +4,8 @@ English | [中文](README_CN.md)
 
 Lightweight Java DynamoDB library. Annotation-driven, zero config files, one `DDM` class for all CRUD operations.
 
+> DDM = **D**ynamo**D**ata**M**anager
+
 ```java
 DDM ddm = DDM.builder(client)
     .tablePrefix("prod_")
@@ -16,24 +18,76 @@ ddm.update(user, u -> u.setName("New Name"));      // Partial update
 ddm.delete(User.class, "user-001");                // Delete
 List<User> users = ddm.query(User.class)           // Query
     .keyCondition("pk = :pk")
-    .expressionValues(Map.of(":pk", AttributeValue.builder().s("user-001").build()))
+    .value(":pk", "user-001")                      // Auto-converts to AttributeValue
     .executeAll();
 ```
+
+## Why EasyDynamodb?
+
+AWS SDK Enhanced Client is powerful but verbose. EasyDynamodb trades some flexibility for simplicity:
+
+| | AWS Enhanced Client | EasyDynamodb |
+|---|---|---|
+| Config files | TableSchema / StaticTableSchema | Zero — annotation-driven |
+| CRUD code | Separate Table, Index, Key objects | One `DDM` class, one-liner calls |
+| Partial update | Manual UpdateExpression building | `update(entity, mutator)` with auto-diff |
+| Batch operations | Manual chunking + retry | Auto-split, parallel, exponential backoff |
+| Type conversion | BeanTableSchema or manual | Auto-detected, extensible converters |
+| Learning curve | Moderate | Minimal — if you know JPA annotations, you're set |
+
+EasyDynamodb is ideal for projects that want DynamoDB without the boilerplate. If you need fine-grained control over every request parameter, the AWS SDK Enhanced Client is the better choice.
 
 ## Requirements
 
 - Java 21+
 - AWS SDK v2
 
-## Maven Dependency
+## Quick Start
+
+**1. Add Maven dependency:**
 
 ```xml
 <dependency>
     <groupId>games.jojocat.framework</groupId>
     <artifactId>easy-dynamodb</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.2</version>
 </dependency>
 ```
+
+**2. Define your entity:**
+
+```java
+@DynamoTable("users")
+public class User {
+    private String userId;
+    private String name;
+
+    public User() {}  // Required: no-arg constructor
+
+    @DynamoDbPartitionKey
+    @DynamoDbAttribute("user_id")
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+}
+```
+
+**3. Start using:**
+
+```java
+DynamoDbClient client = DynamoDbClient.create();
+DDM ddm = DDM.create(client);
+
+User user = new User();
+user.setUserId("u-001");
+user.setName("Alice");
+ddm.save(user);
+User found = ddm.get(User.class, "u-001");
+```
+
+That's it. No XML, no YAML, no config files.
 
 ---
 
@@ -44,6 +98,7 @@ List<User> users = ddm.query(User.class)           // Query
 | Save | `save(entity)` | Save single entity |
 | Save | `saveBatch(list)` | Batch save (auto-split 25/batch, parallel) |
 | Get | `get(Class, pk)` / `get(Class, pk, sk)` | Get single entity by exact key |
+| Get | `get(Class, pk, consistentRead)` | Get with strongly consistent read |
 | Get | `getBatch(Class, keys)` | Batch get by exact keys (100/batch, parallel) |
 | Query | `query(Class)` | Fluent query builder (key conditions, GSI, filter, pagination) |
 | Query | `scan(Class)` | Fluent scan builder (filter, pagination) |
@@ -53,7 +108,8 @@ List<User> users = ddm.query(User.class)           // Query
 | Update | `updateAllBatch(list)` | Batch full update (parallel) |
 | Delete | `delete(Class, pk)` / `delete(Class, pk, sk)` | Delete by exact key |
 | Delete | `deleteBatch(Class, keys)` | Batch delete by keys (25/batch, parallel) |
-| Delete | `deleteByCondition(Class, filter, values, names)` | Delete by condition, returns count |
+| Delete | `deleteByCondition(Class, filter, values)` | Delete by condition, returns count |
+| Delete | `deleteByConditionWithValues(Class, filter, values)` | Delete by condition with auto-converted values |
 
 ---
 
@@ -170,6 +226,9 @@ When `autoCreateTable(true)` is set, the first `save()` call will auto-create th
 // Exact key lookup (DynamoDB GetItem — O(1), cheapest)
 Game game = ddm.get(Game.class, "zelda-001", "v1.0");
 
+// Strongly consistent read
+Game game = ddm.get(Game.class, "zelda-001", "v1.0", true);
+
 // Batch exact key lookup (DynamoDB BatchGetItem — 100/batch)
 List<Game> games = ddm.getBatch(Game.class, List.of(
     new KeyPair("zelda-001", "v1.0"),
@@ -180,24 +239,34 @@ List<Game> games = ddm.getBatch(Game.class, List.of(
 `KeyPair` accepts `(partitionKey, sortKey)` or just `(partitionKey)` for tables without a sort key.
 
 ```java
-// Conditional query (DynamoDB Query — range conditions, GSI, pagination)
+// Conditional query with value() shorthand
 List<Game> rpgGames = ddm.query(Game.class)
     .index("genre-rating-index")
     .keyCondition("genre = :genre AND rating > :min")
-    .expressionValues(Map.of(
-        ":genre", AttributeValue.builder().s("RPG").build(),
-        ":min", AttributeValue.builder().n("9.0").build()
-    ))
+    .value(":genre", "RPG")
+    .value(":min", 9.0)
     .descending()
     .limit(10)
+    .consistentRead(true)
     .executeAll();
 
-// Scan with filter (full table scan)
+// Query with projection (only return specific attributes)
+List<Game> titles = ddm.query(Game.class)
+    .keyCondition("game_id = :pk")
+    .value(":pk", "zelda-001")
+    .projection("game_id, version, title")
+    .executeAll();
+
+// Scan with filter
 List<Game> all = ddm.scan(Game.class)
     .filter("rating > :min")
-    .expressionValues(Map.of(":min", AttributeValue.builder().n("9.0").build()))
+    .value(":min", 9.0)
     .executeAll();
 ```
+
+The `value()` method auto-converts Java types to `AttributeValue` — no more verbose `AttributeValue.builder().s("...").build()`. Supported types: String, Number, Boolean, Enum, Instant, LocalDateTime, byte[].
+
+You can still use `expressionValues(Map<String, AttributeValue>)` for full control. Both methods can be mixed — `value()` entries are merged into the expression values map.
 
 > `get` vs `query`: `get` is an O(1) exact key lookup (cheapest). `query` supports range conditions, GSI, sorting, and pagination — use it when you need to find multiple items by condition.
 
@@ -206,13 +275,13 @@ List<Game> all = ddm.scan(Game.class)
 Both `query()` and `scan()` support two execution modes:
 
 - `executeAll()` — auto-paginates and returns all matching items in a single `List<T>`.
-- `execute()` — returns a single page as `QueryResult<T>`, which contains `items()` and `lastEvaluatedKey()` for manual pagination.
+- `execute()` — returns a single page as `PagedResult<T>`, which contains `items()` and `lastEvaluatedKey()` for manual pagination.
 
 ```java
 // Manual pagination
-QueryOperation.QueryResult<Game> page = ddm.query(Game.class)
+var page = ddm.query(Game.class)
     .keyCondition("genre = :genre")
-    .expressionValues(Map.of(":genre", AttributeValue.builder().s("RPG").build()))
+    .value(":genre", "RPG")
     .limit(20)
     .execute();
 
@@ -221,9 +290,9 @@ boolean hasMore = page.hasMorePages();
 
 // Fetch next page
 if (hasMore) {
-    QueryOperation.QueryResult<Game> nextPage = ddm.query(Game.class)
+    var nextPage = ddm.query(Game.class)
         .keyCondition("genre = :genre")
-        .expressionValues(Map.of(":genre", AttributeValue.builder().s("RPG").build()))
+        .value(":genre", "RPG")
         .limit(20)
         .startKey(page.lastEvaluatedKey())
         .execute();
@@ -266,12 +335,16 @@ ddm.deleteBatch(Game.class, List.of(
 // Delete by condition — returns number of items deleted
 int deleted = ddm.deleteByCondition(Game.class,
     "rating < :minRating",
-    Map.of(":minRating", AttributeValue.builder().n("5.0").build()),
-    null);
+    Map.of(":minRating", AttributeValue.builder().n("5.0").build()));
 System.out.println("Deleted " + deleted + " items");
+
+// Delete by condition with auto-converted values (recommended)
+int deleted2 = ddm.deleteByConditionWithValues(Game.class,
+    "rating < :minRating",
+    Map.of(":minRating", 5.0));
 ```
 
-`deleteByCondition` internally performs a scan → extract keys → batch delete loop. The `expressionNames` parameter (last argument) can be `null` if not needed.
+`deleteByCondition` internally performs a scan → extract keys → batch delete loop.
 
 ---
 
@@ -280,7 +353,7 @@ System.out.println("Deleted " + deleted + " items");
 | Java Type | DynamoDB Type | Notes |
 |-----------|--------------|-------|
 | `String` | S | |
-| `Integer` `Long` `Float` `Double` `BigDecimal` | N | Boxed and primitive types both supported |
+| `Integer` `Long` `Float` `Double` `Short` `Byte` `BigDecimal` | N | Boxed and primitive types both supported |
 | `Boolean` | BOOL | Boxed and primitive both supported |
 | `byte[]` | B | Binary |
 | `Enum` | S | Auto-converted via `name()` |
@@ -403,6 +476,55 @@ You need to provide an SLF4J implementation (e.g. `slf4j-simple`, `logback-class
 - Converters bound at registration time — zero lookup overhead at runtime
 - Batch and update operations parallelized via virtual threads (Java 21+)
 - Custom `batchExecutor` supported for environments where virtual threads are not desired
+
+---
+
+## FAQ
+
+**Q: Does my entity class need a no-arg constructor?**
+Yes. EasyDynamodb uses `MethodHandle` to instantiate entities. A public no-arg constructor is required.
+
+**Q: Can I use Lombok `@Data` / `@Builder`?**
+`@Data` works if it generates standard getters/setters. `@Builder` alone won't work because it typically removes the no-arg constructor — add `@NoArgsConstructor` alongside it.
+
+**Q: Is `save()` an insert or upsert?**
+`save()` maps to DynamoDB `PutItem`, which is an upsert — it overwrites the entire item if the key already exists. There is currently no `saveIfNotExists()` API.
+
+**Q: Can I use this with DynamoDB Local for testing?**
+Yes. Point your `DynamoDbClient` to the local endpoint:
+```java
+DynamoDbClient client = DynamoDbClient.builder()
+    .endpointOverride(URI.create("http://localhost:8000"))
+    .region(Region.US_EAST_1)
+    .build();
+DDM ddm = DDM.builder(client).autoCreateTable(true).build();
+```
+
+**Q: What happens if a batch operation partially fails?**
+Batch operations retry unprocessed items up to 3 times with exponential backoff. If items still remain, a `DynamoBatchException` is thrown containing all individual failures.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please follow these guidelines:
+
+1. Fork the repository and create a feature branch from `main`
+2. Follow existing code style (Google Java Style)
+3. Add tests for new features — run `mvn test` to verify all tests pass
+4. Keep changes focused — one feature or fix per PR
+5. Update README if adding user-facing features
+
+### Development Setup
+
+```bash
+git clone https://github.com/game-ark/easy-dynamodb.git
+mvn clean test    # Requires Java 21+
+```
+
+All tests use Mockito — no real DynamoDB connection needed for development.
+
+---
 
 ## License
 

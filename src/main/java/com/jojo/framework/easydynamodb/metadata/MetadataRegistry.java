@@ -399,8 +399,9 @@ public class MetadataRegistry {
                 Type elementType = typeArgs[0];
                 if (elementType instanceof Class<?> elementClass) {
                     if (isNumericType(elementClass)) {
-                        return new SetConverter(SetConverter.SetType.NUMBER_SET);
+                        return new SetConverter(SetConverter.SetType.NUMBER_SET, elementClass);
                     }
+                    return new SetConverter(SetConverter.SetType.STRING_SET, elementClass);
                 }
             }
         }

@@ -57,6 +57,8 @@ public class QueryOperation {
         private Map<String, String> expressionNames;
         private Integer limit;
         private Boolean scanForward = true;
+        private Boolean consistentRead;
+        private String projectionExpression;
         private Map<String, AttributeValue> exclusiveStartKey;
 
         QueryBuilder(Class<T> clazz, EntityMetadata metadata) {
@@ -84,7 +86,25 @@ public class QueryOperation {
 
         /** Set expression attribute values (e.g. ":pk" → AttributeValue). */
         public QueryBuilder<T> expressionValues(Map<String, AttributeValue> values) {
-            this.expressionValues = values;
+            this.expressionValues = values != null ? new java.util.HashMap<>(values) : null;
+            return this;
+        }
+
+        /**
+         * Shorthand for adding a single expression attribute value.
+         * Automatically converts the Java value to AttributeValue.
+         * <p>
+         * Example: {@code .value(":genre", "RPG").value(":min", 9.0)}
+         *
+         * @param placeholder the expression placeholder (e.g. ":genre")
+         * @param val         the Java value (String, Number, Boolean, Enum, Instant, etc.)
+         * @return this builder
+         */
+        public QueryBuilder<T> value(String placeholder, Object val) {
+            if (this.expressionValues == null) {
+                this.expressionValues = new java.util.HashMap<>();
+            }
+            this.expressionValues.put(placeholder, AttributeValues.of(val));
             return this;
         }
 
@@ -109,6 +129,31 @@ public class QueryOperation {
         /** Sort descending. */
         public QueryBuilder<T> descending() {
             this.scanForward = false;
+            return this;
+        }
+
+        /**
+         * Enable or disable consistent read. Default is eventually consistent (false).
+         * Note: ConsistentRead is not supported on GSI queries.
+         *
+         * @param consistentRead true for strongly consistent read
+         * @return this builder
+         */
+        public QueryBuilder<T> consistentRead(boolean consistentRead) {
+            this.consistentRead = consistentRead;
+            return this;
+        }
+
+        /**
+         * Set a projection expression to return only specific attributes.
+         * <p>
+         * Example: {@code .projection("gameId, title, rating")}
+         *
+         * @param projectionExpression the projection expression
+         * @return this builder
+         */
+        public QueryBuilder<T> projection(String projectionExpression) {
+            this.projectionExpression = projectionExpression;
             return this;
         }
 
@@ -148,6 +193,12 @@ public class QueryOperation {
             }
             if (limit != null) {
                 builder.limit(limit);
+            }
+            if (consistentRead != null) {
+                builder.consistentRead(consistentRead);
+            }
+            if (projectionExpression != null) {
+                builder.projectionExpression(projectionExpression);
             }
             if (exclusiveStartKey != null && !exclusiveStartKey.isEmpty()) {
                 builder.exclusiveStartKey(exclusiveStartKey);
@@ -210,6 +261,11 @@ public class QueryOperation {
     public record QueryResult<T>(List<T> items, Map<String, AttributeValue> lastEvaluatedKey) {
         public boolean hasMorePages() {
             return lastEvaluatedKey != null && !lastEvaluatedKey.isEmpty();
+        }
+
+        /** Converts to the new PagedResult type. */
+        public com.jojo.framework.easydynamodb.model.PagedResult<T> toPagedResult() {
+            return new com.jojo.framework.easydynamodb.model.PagedResult<>(items, lastEvaluatedKey);
         }
     }
 }

@@ -31,21 +31,35 @@ public class GetOperation {
     }
 
     public <T> T get(Class<T> clazz, Object partitionKey) {
-        return get(clazz, partitionKey, null);
+        return get(clazz, partitionKey, null, false);
     }
 
-    @SuppressWarnings("unchecked")
     public <T> T get(Class<T> clazz, Object partitionKey, Object sortKey) {
+        return get(clazz, partitionKey, sortKey, false);
+    }
+
+    /**
+     * Get a single entity by key with optional consistent read.
+     *
+     * @param clazz          the entity class
+     * @param partitionKey   the partition key value
+     * @param sortKey        the sort key value (nullable)
+     * @param consistentRead true for strongly consistent read, false for eventually consistent
+     * @return the entity, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T get(Class<T> clazz, Object partitionKey, Object sortKey, boolean consistentRead) {
         metadataRegistry.register(clazz);
         EntityMetadata metadata = metadataRegistry.getMetadata(clazz);
 
         Map<String, AttributeValue> keyMap = KeyBuilder.buildKeyMap(metadata, partitionKey, sortKey);
-        log.debug("GetItem from table={}, key={}", metadata.getTableName(), keyMap);
+        log.debug("GetItem from table={}, key={}, consistentRead={}", metadata.getTableName(), keyMap, consistentRead);
 
         try {
             GetItemResponse response = dynamoDbClient.getItem(GetItemRequest.builder()
                     .tableName(metadata.getTableName())
                     .key(keyMap)
+                    .consistentRead(consistentRead)
                     .build());
 
             if (!response.hasItem() || response.item().isEmpty()) {

@@ -129,4 +129,81 @@ class DDMTest {
         // Should not throw on re-register
         ddm.register(SimpleItem.class);
     }
+
+    @Test
+    void get_withConsistentRead_shouldDelegateCorrectly() {
+        Map<String, AttributeValue> item = Map.of(
+                "item_id", AttributeValue.builder().s("id-1").build(),
+                "name", AttributeValue.builder().s("test").build()
+        );
+        when(dynamoDbClient.getItem(any(GetItemRequest.class)))
+                .thenReturn(GetItemResponse.builder().item(item).build());
+
+        DDM ddm = DDM.create(dynamoDbClient);
+        SimpleItem result = ddm.get(SimpleItem.class, "id-1", true);
+
+        assertThat(result).isNotNull();
+        var captor = org.mockito.ArgumentCaptor.forClass(GetItemRequest.class);
+        verify(dynamoDbClient).getItem(captor.capture());
+        assertThat(captor.getValue().consistentRead()).isTrue();
+    }
+
+    @Test
+    void deleteByCondition_withoutExpressionNames_shouldWork() {
+        // Mock scan returning one item
+        Map<String, AttributeValue> item = Map.of(
+                "item_id", AttributeValue.builder().s("id-1").build()
+        );
+        when(dynamoDbClient.scan(any(software.amazon.awssdk.services.dynamodb.model.ScanRequest.class)))
+                .thenReturn(software.amazon.awssdk.services.dynamodb.model.ScanResponse.builder()
+                        .items(java.util.List.of(item)).build());
+        when(dynamoDbClient.batchWriteItem(any(software.amazon.awssdk.services.dynamodb.model.BatchWriteItemRequest.class)))
+                .thenReturn(software.amazon.awssdk.services.dynamodb.model.BatchWriteItemResponse.builder().build());
+
+        DDM ddm = DDM.create(dynamoDbClient);
+        int deleted = ddm.deleteByCondition(SimpleItem.class,
+                "count < :min",
+                Map.of(":min", AttributeValue.builder().n("5").build()));
+
+        assertThat(deleted).isEqualTo(1);
+    }
+
+    // ======== Test for Fix #2: deleteByConditionWithValues ========
+
+    @Test
+    void deleteByConditionWithValues_shouldAutoConvertValues() {
+        Map<String, AttributeValue> item = Map.of(
+                "item_id", AttributeValue.builder().s("id-1").build()
+        );
+        when(dynamoDbClient.scan(any(software.amazon.awssdk.services.dynamodb.model.ScanRequest.class)))
+                .thenReturn(software.amazon.awssdk.services.dynamodb.model.ScanResponse.builder()
+                        .items(java.util.List.of(item)).build());
+        when(dynamoDbClient.batchWriteItem(any(software.amazon.awssdk.services.dynamodb.model.BatchWriteItemRequest.class)))
+                .thenReturn(software.amazon.awssdk.services.dynamodb.model.BatchWriteItemResponse.builder().build());
+
+        DDM ddm = DDM.create(dynamoDbClient);
+        int deleted = ddm.deleteByConditionWithValues(SimpleItem.class,
+                "count < :min",
+                Map.of(":min", 5.0));
+
+        assertThat(deleted).isEqualTo(1);
+    }
+
+    // ======== Test for Fix #5: batchExecutor passed to UpdateOperation ========
+
+    @Test
+    void builder_withBatchExecutor_shouldPassToUpdateOperation() {
+        when(dynamoDbClient.updateItem(any(UpdateItemRequest.class)))
+                .thenReturn(UpdateItemResponse.builder().build());
+
+        java.util.concurrent.Executor customExecutor = Runnable::run;
+        DDM ddm = DDM.builder(dynamoDbClient)
+                .batchExecutor(customExecutor)
+                .build();
+
+        SimpleItem item = new SimpleItem("id-1", "test", 10);
+        ddm.updateBatch(java.util.List.of(item), e -> e.setName("updated"));
+
+        verify(dynamoDbClient, atLeastOnce()).updateItem(any(UpdateItemRequest.class));
+    }
 }

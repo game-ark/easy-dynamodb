@@ -69,6 +69,49 @@ class ScanOperationTest {
     }
 
     @Test
+    void scan_valueShorthand_shouldAutoConvert() {
+        ScanResponse response = ScanResponse.builder().items(List.of()).build();
+        when(dynamoDbClient.scan(any(ScanRequest.class))).thenReturn(response);
+
+        scanOperation.scan(SimpleItem.class)
+                .filter("count > :min")
+                .value(":min", 5)
+                .execute();
+
+        ArgumentCaptor<ScanRequest> captor = ArgumentCaptor.forClass(ScanRequest.class);
+        verify(dynamoDbClient).scan(captor.capture());
+        assertThat(captor.getValue().expressionAttributeValues().get(":min").n()).isEqualTo("5");
+    }
+
+    @Test
+    void scan_consistentRead_shouldSetOnRequest() {
+        ScanResponse response = ScanResponse.builder().items(List.of()).build();
+        when(dynamoDbClient.scan(any(ScanRequest.class))).thenReturn(response);
+
+        scanOperation.scan(SimpleItem.class)
+                .consistentRead(true)
+                .execute();
+
+        ArgumentCaptor<ScanRequest> captor = ArgumentCaptor.forClass(ScanRequest.class);
+        verify(dynamoDbClient).scan(captor.capture());
+        assertThat(captor.getValue().consistentRead()).isTrue();
+    }
+
+    @Test
+    void scan_projection_shouldSetOnRequest() {
+        ScanResponse response = ScanResponse.builder().items(List.of()).build();
+        when(dynamoDbClient.scan(any(ScanRequest.class))).thenReturn(response);
+
+        scanOperation.scan(SimpleItem.class)
+                .projection("item_id, name")
+                .execute();
+
+        ArgumentCaptor<ScanRequest> captor = ArgumentCaptor.forClass(ScanRequest.class);
+        verify(dynamoDbClient).scan(captor.capture());
+        assertThat(captor.getValue().projectionExpression()).isEqualTo("item_id, name");
+    }
+
+    @Test
     void scan_withLimit_shouldSetLimit() {
         ScanResponse response = ScanResponse.builder().items(List.of()).build();
         when(dynamoDbClient.scan(any(ScanRequest.class))).thenReturn(response);

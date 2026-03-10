@@ -94,6 +94,11 @@ public class FieldMetadata {
         try {
             return converter.fromAttributeValue(av);
         } catch (DynamoConversionException e) {
+            // Re-wrap with the correct field name if the converter used a placeholder
+            if ("unknown".equals(e.getFieldName()) || "enum-field".equals(e.getFieldName())
+                    || "set-field".equals(e.getFieldName())) {
+                throw new DynamoConversionException(javaFieldName, e.getSourceType(), e.getTargetType(), e.getCause());
+            }
             throw e;
         } catch (Exception e) {
             throw new DynamoConversionException(

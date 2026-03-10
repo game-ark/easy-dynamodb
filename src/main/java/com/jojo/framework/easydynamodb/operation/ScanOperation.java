@@ -4,6 +4,7 @@ import com.jojo.framework.easydynamodb.exception.DynamoException;
 import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import com.jojo.framework.easydynamodb.metadata.EntityMetadata;
 import com.jojo.framework.easydynamodb.metadata.MetadataRegistry;
+import com.jojo.framework.easydynamodb.model.PagedResult;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
@@ -47,6 +48,8 @@ public class ScanOperation {
         private Map<String, AttributeValue> expressionValues;
         private Map<String, String> expressionNames;
         private Integer limit;
+        private Boolean consistentRead;
+        private String projectionExpression;
         private Map<String, AttributeValue> exclusiveStartKey;
 
         ScanBuilder(Class<T> clazz, EntityMetadata metadata) {
@@ -60,7 +63,25 @@ public class ScanOperation {
         }
 
         public ScanBuilder<T> expressionValues(Map<String, AttributeValue> values) {
-            this.expressionValues = values;
+            this.expressionValues = values != null ? new java.util.HashMap<>(values) : null;
+            return this;
+        }
+
+        /**
+         * Shorthand for adding a single expression attribute value.
+         * Automatically converts the Java value to AttributeValue.
+         * <p>
+         * Example: {@code .value(":min", 9.0)}
+         *
+         * @param placeholder the expression placeholder (e.g. ":min")
+         * @param val         the Java value (String, Number, Boolean, Enum, Instant, etc.)
+         * @return this builder
+         */
+        public ScanBuilder<T> value(String placeholder, Object val) {
+            if (this.expressionValues == null) {
+                this.expressionValues = new java.util.HashMap<>();
+            }
+            this.expressionValues.put(placeholder, AttributeValues.of(val));
             return this;
         }
 
@@ -74,13 +95,37 @@ public class ScanOperation {
             return this;
         }
 
+        /**
+         * Enable or disable consistent read. Default is eventually consistent (false).
+         *
+         * @param consistentRead true for strongly consistent read
+         * @return this builder
+         */
+        public ScanBuilder<T> consistentRead(boolean consistentRead) {
+            this.consistentRead = consistentRead;
+            return this;
+        }
+
+        /**
+         * Set a projection expression to return only specific attributes.
+         * <p>
+         * Example: {@code .projection("gameId, title, rating")}
+         *
+         * @param projectionExpression the projection expression
+         * @return this builder
+         */
+        public ScanBuilder<T> projection(String projectionExpression) {
+            this.projectionExpression = projectionExpression;
+            return this;
+        }
+
         public ScanBuilder<T> startKey(Map<String, AttributeValue> startKey) {
             this.exclusiveStartKey = startKey;
             return this;
         }
 
         @SuppressWarnings("unchecked")
-        public QueryOperation.QueryResult<T> execute() {
+        public PagedResult<T> execute() {
             log.debug("Scan table={}, filter={}, limit={}",
                     metadata.getTableName(), filterExpression, limit);
 
@@ -98,6 +143,12 @@ public class ScanOperation {
             }
             if (limit != null) {
                 builder.limit(limit);
+            }
+            if (consistentRead != null) {
+                builder.consistentRead(consistentRead);
+            }
+            if (projectionExpression != null) {
+                builder.projectionExpression(projectionExpression);
             }
             if (exclusiveStartKey != null && !exclusiveStartKey.isEmpty()) {
                 builder.exclusiveStartKey(exclusiveStartKey);
@@ -119,7 +170,7 @@ public class ScanOperation {
                 log.debug("Scan table={} returned {} items, hasMore={}", metadata.getTableName(),
                         items.size(), lastKey != null);
 
-                return new QueryOperation.QueryResult<>(items, lastKey);
+                return new PagedResult<>(items, lastKey);
             } catch (DynamoDbException e) {
                 log.error("Scan failed for table={}: {}", metadata.getTableName(), e.getMessage());
                 throw new DynamoException(
@@ -135,7 +186,7 @@ public class ScanOperation {
 
             do {
                 this.exclusiveStartKey = currentStartKey;
-                QueryOperation.QueryResult<T> result = execute();
+                PagedResult<T> result = execute();
                 allItems.addAll(result.items());
                 currentStartKey = result.lastEvaluatedKey();
                 pageCount++;

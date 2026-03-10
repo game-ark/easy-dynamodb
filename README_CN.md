@@ -4,6 +4,8 @@
 
 轻量级 Java DynamoDB 操作库。注解驱动，零配置文件，一个 `DDM` 类搞定增删改查。
 
+> DDM = **D**ynamo**D**ata**M**anager
+
 ```java
 DDM ddm = DDM.builder(client)
     .tablePrefix("prod_")
@@ -16,24 +18,76 @@ ddm.update(user, u -> u.setName("新名字"));          // 部分更新
 ddm.delete(User.class, "user-001");                // 删除
 List<User> users = ddm.query(User.class)           // 条件查询
     .keyCondition("pk = :pk")
-    .expressionValues(Map.of(":pk", AttributeValue.builder().s("user-001").build()))
+    .value(":pk", "user-001")                      // 自动转换为 AttributeValue
     .executeAll();
 ```
+
+## 为什么选择 EasyDynamodb？
+
+AWS SDK Enhanced Client 功能强大但代码冗长。EasyDynamodb 用少量灵活性换取极致简洁：
+
+| | AWS Enhanced Client | EasyDynamodb |
+|---|---|---|
+| 配置文件 | TableSchema / StaticTableSchema | 零配置 — 注解驱动 |
+| CRUD 代码 | 需要分别创建 Table、Index、Key 对象 | 一个 `DDM` 类，一行代码搞定 |
+| 部分更新 | 手动构建 UpdateExpression | `update(entity, mutator)` 自动 diff |
+| 批量操作 | 手动分片 + 重试 | 自动分片、并行、指数退避重试 |
+| 类型转换 | BeanTableSchema 或手动 | 自动检测，可扩展转换器 |
+| 学习成本 | 中等 | 极低 — 会 JPA 注解就会用 |
+
+EasyDynamodb 适合希望快速使用 DynamoDB 而不想写大量样板代码的项目。如果你需要对每个请求参数进行精细控制，AWS SDK Enhanced Client 是更好的选择。
 
 ## 环境要求
 
 - Java 21+
 - AWS SDK v2
 
-## Maven 依赖
+## 快速开始
+
+**1. 添加 Maven 依赖：**
 
 ```xml
 <dependency>
     <groupId>games.jojocat.framework</groupId>
     <artifactId>easy-dynamodb</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.2</version>
 </dependency>
 ```
+
+**2. 定义实体：**
+
+```java
+@DynamoTable("users")
+public class User {
+    private String userId;
+    private String name;
+
+    public User() {}  // 必须：无参构造函数
+
+    @DynamoDbPartitionKey
+    @DynamoDbAttribute("user_id")
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+}
+```
+
+**3. 开始使用：**
+
+```java
+DynamoDbClient client = DynamoDbClient.create();
+DDM ddm = DDM.create(client);
+
+User user = new User();
+user.setUserId("u-001");
+user.setName("Alice");
+ddm.save(user);
+User found = ddm.get(User.class, "u-001");
+```
+
+就这么简单。无 XML，无 YAML，无配置文件。
 
 ---
 
@@ -44,16 +98,18 @@ List<User> users = ddm.query(User.class)           // 条件查询
 | 新增 | `save(entity)` | 保存单条 |
 | 新增 | `saveBatch(list)` | 批量保存（25条/批，并行） |
 | 查询 | `get(Class, pk)` / `get(Class, pk, sk)` | 按主键精确获取 |
+| 查询 | `get(Class, pk, consistentRead)` | 强一致性读取 |
 | 查询 | `getBatch(Class, keys)` | 按主键批量获取（100条/批，并行） |
-| 查询 | `query(Class)` | 条件查询（范围条件、GSI、过滤、分页） |
-| 查询 | `scan(Class)` | 全表扫描（过滤、分页） |
+| 查询 | `query(Class)` | 条件查询构建器（范围条件、GSI、过滤、分页） |
+| 查询 | `scan(Class)` | 全表扫描构建器（过滤、分页） |
 | 更新 | `update(entity, mutator)` | 部分更新（仅变更字段） |
 | 更新 | `updateAll(entity)` | 全量更新 |
 | 更新 | `updateBatch(list, mutator)` | 批量部分更新（并行） |
 | 更新 | `updateAllBatch(list)` | 批量全量更新（并行） |
 | 删除 | `delete(Class, pk)` / `delete(Class, pk, sk)` | 按主键删除 |
 | 删除 | `deleteBatch(Class, keys)` | 按主键批量删除（25条/批，并行） |
-| 删除 | `deleteByCondition(Class, filter, values, names)` | 按条件删除，返回删除条数 |
+| 删除 | `deleteByCondition(Class, filter, values)` | 按条件删除，返回删除条数 |
+| 删除 | `deleteByConditionWithValues(Class, filter, values)` | 按条件删除，值自动转换 |
 
 ---
 
@@ -97,11 +153,11 @@ public class Game {
 ```
 
 要点说明：
-- `@DynamoTable("game")` - 映射到 DynamoDB 表名 `game`。省略或留空时默认使用类名。
-- `@DynamoDbPartitionKey` / `@DynamoDbSortKey` - 标注在 getter 上。分区键必须有且仅有一个，排序键可选。
-- `@DynamoDbAttribute("game_id")` - 自定义 DynamoDB 属性名。省略时使用 Java 字段名。
-- `@DynamoDbIgnore` - 标注在 getter 上，该字段不参与 DynamoDB 映射。
-- `@DynamoDbSecondaryPartitionKey` / `@DynamoDbSecondarySortKey` - GSI 键定义，标注在 getter 上。
+- `@DynamoTable("game")` — 映射到 DynamoDB 表名 `game`。省略或留空时默认使用类名。
+- `@DynamoDbPartitionKey` / `@DynamoDbSortKey` — 标注在 getter 上。分区键必须有且仅有一个，排序键可选。
+- `@DynamoDbAttribute("game_id")` — 自定义 DynamoDB 属性名。省略时使用 Java 字段名。
+- `@DynamoDbIgnore` — 标注在 getter 上，该字段不参与 DynamoDB 映射。
+- `@DynamoDbSecondaryPartitionKey` / `@DynamoDbSecondarySortKey` — GSI 键定义，标注在 getter 上。
 
 嵌套实体（如上面的 `GameDetail`）只要标注了 `@DynamoTable` 或 `@DynamoDbBean`，就会被自动检测并以 DynamoDB Map（M）类型存储。
 
@@ -167,10 +223,13 @@ ddm.saveBatch(gameList);     // 批量保存（25条/批，并行）
 ### 4. 查询
 
 ```java
-// 精确主键查询（GetItem - O(1)，最便宜）
+// 精确主键查询（GetItem — O(1)，最便宜）
 Game game = ddm.get(Game.class, "zelda-001", "v1.0");
 
-// 批量主键查询（BatchGetItem - 100条/批）
+// 强一致性读取
+Game game = ddm.get(Game.class, "zelda-001", "v1.0", true);
+
+// 批量主键查询（BatchGetItem — 100条/批）
 List<Game> games = ddm.getBatch(Game.class, List.of(
     new KeyPair("zelda-001", "v1.0"),
     new KeyPair("mario-001", "v2.0")
@@ -180,24 +239,34 @@ List<Game> games = ddm.getBatch(Game.class, List.of(
 `KeyPair` 接受 `(partitionKey, sortKey)` 或仅 `(partitionKey)`（用于没有排序键的表）。
 
 ```java
-// 条件查询（Query - 支持范围条件、GSI、排序、分页）
+// 条件查询，使用 value() 简写
 List<Game> rpgGames = ddm.query(Game.class)
     .index("genre-rating-index")
     .keyCondition("genre = :genre AND rating > :min")
-    .expressionValues(Map.of(
-        ":genre", AttributeValue.builder().s("RPG").build(),
-        ":min", AttributeValue.builder().n("9.0").build()
-    ))
+    .value(":genre", "RPG")
+    .value(":min", 9.0)
     .descending()
     .limit(10)
+    .consistentRead(true)
+    .executeAll();
+
+// 投影查询（仅返回指定属性）
+List<Game> titles = ddm.query(Game.class)
+    .keyCondition("game_id = :pk")
+    .value(":pk", "zelda-001")
+    .projection("game_id, version, title")
     .executeAll();
 
 // 全表扫描
 List<Game> all = ddm.scan(Game.class)
     .filter("rating > :min")
-    .expressionValues(Map.of(":min", AttributeValue.builder().n("9.0").build()))
+    .value(":min", 9.0)
     .executeAll();
 ```
+
+`value()` 方法自动将 Java 类型转换为 `AttributeValue`——不再需要冗长的 `AttributeValue.builder().s("...").build()`。支持的类型：String、Number、Boolean、Enum、Instant、LocalDateTime、byte[]。
+
+你仍然可以使用 `expressionValues(Map<String, AttributeValue>)` 进行完全控制。两种方式可以混用——`value()` 的条目会合并到表达式值 Map 中。
 
 > `get` vs `query`：`get` 是 O(1) 精确主键查找（最便宜）。`query` 支持范围条件、GSI、排序和分页——需要按条件查找多条记录时使用。
 
@@ -205,14 +274,14 @@ List<Game> all = ddm.scan(Game.class)
 
 `query()` 和 `scan()` 都支持两种执行模式：
 
-- `executeAll()` - 自动翻页，返回所有匹配项的 `List<T>`。
-- `execute()` - 返回单页结果 `QueryResult<T>`，包含 `items()` 和 `lastEvaluatedKey()`，用于手动分页。
+- `executeAll()` — 自动翻页，返回所有匹配项的 `List<T>`。
+- `execute()` — 返回单页结果 `PagedResult<T>`，包含 `items()` 和 `lastEvaluatedKey()`，用于手动分页。
 
 ```java
 // 手动分页
-QueryOperation.QueryResult<Game> page = ddm.query(Game.class)
+var page = ddm.query(Game.class)
     .keyCondition("genre = :genre")
-    .expressionValues(Map.of(":genre", AttributeValue.builder().s("RPG").build()))
+    .value(":genre", "RPG")
     .limit(20)
     .execute();
 
@@ -221,9 +290,9 @@ boolean hasMore = page.hasMorePages();
 
 // 获取下一页
 if (hasMore) {
-    QueryOperation.QueryResult<Game> nextPage = ddm.query(Game.class)
+    var nextPage = ddm.query(Game.class)
         .keyCondition("genre = :genre")
-        .expressionValues(Map.of(":genre", AttributeValue.builder().s("RPG").build()))
+        .value(":genre", "RPG")
         .limit(20)
         .startKey(page.lastEvaluatedKey())
         .execute();
@@ -233,13 +302,13 @@ if (hasMore) {
 ### 5. 更新
 
 ```java
-// 部分更新 - 只发送变更字段
+// 部分更新 — 只发送变更字段
 ddm.update(game, g -> {
     g.setTitle("塞尔达：王国之泪");
     g.setRating(9.9);
 });
 
-// 全量更新 - 非 null 字段 SET，null 字段 REMOVE
+// 全量更新 — 非 null 字段 SET，null 字段 REMOVE
 ddm.updateAll(game);
 
 // 批量部分更新（并行）
@@ -263,15 +332,19 @@ ddm.deleteBatch(Game.class, List.of(
     new KeyPair("mario-001", "v2.0")
 ));
 
-// 按条件删除 - 返回删除条数
+// 按条件删除 — 返回删除条数
 int deleted = ddm.deleteByCondition(Game.class,
     "rating < :minRating",
-    Map.of(":minRating", AttributeValue.builder().n("5.0").build()),
-    null);
+    Map.of(":minRating", AttributeValue.builder().n("5.0").build()));
 System.out.println("已删除 " + deleted + " 条");
+
+// 按条件删除，值自动转换（推荐）
+int deleted2 = ddm.deleteByConditionWithValues(Game.class,
+    "rating < :minRating",
+    Map.of(":minRating", 5.0));
 ```
 
-`deleteByCondition` 内部执行 scan -> 提取主键 -> 批量删除的循环。最后一个参数 `expressionNames` 不需要时可传 `null`。
+`deleteByCondition` 内部执行 scan → 提取主键 → 批量删除的循环。
 
 ---
 
@@ -280,7 +353,7 @@ System.out.println("已删除 " + deleted + " 条");
 | Java 类型 | DynamoDB 类型 | 说明 |
 |-----------|--------------|------|
 | `String` | S | |
-| `Integer` `Long` `Float` `Double` `BigDecimal` | N | 包装类型和基本类型均支持 |
+| `Integer` `Long` `Float` `Double` `Short` `Byte` `BigDecimal` | N | 包装类型和基本类型均支持 |
 | `Boolean` | BOOL | 包装类型和基本类型均支持 |
 | `byte[]` | B | 二进制 |
 | `Enum` | S | 自动按 `name()` 转换 |
@@ -333,11 +406,11 @@ public class StatusConverter implements AttributeConverter<Status> {
 两种注册方式：
 
 ```java
-// 方式一：字段级别 - 仅对该字段生效
+// 方式一：字段级别 — 仅对该字段生效
 @DynamoConverter(StatusConverter.class)
 private Status status;
 
-// 方式二：全局注册 - 对所有该类型的字段生效
+// 方式二：全局注册 — 对所有该类型的字段生效
 DDM ddm = DDM.builder(client)
     .registerConverter(Status.class, new StatusConverter())
     .build();
@@ -403,6 +476,55 @@ DDM ddm = DDM.builder(client)
 - 转换器在注册时绑定——运行时零查找开销
 - 批量和更新操作通过虚拟线程（Java 21+）并行执行
 - 支持自定义 `batchExecutor`，适用于不希望使用虚拟线程的环境
+
+---
+
+## 常见问题
+
+**Q: 实体类必须有无参构造函数吗？**
+是的。EasyDynamodb 使用 `MethodHandle` 实例化实体，需要 public 无参构造函数。
+
+**Q: 可以用 Lombok 的 `@Data` / `@Builder` 吗？**
+`@Data` 可以，因为它会生成标准的 getter/setter。单独使用 `@Builder` 不行，因为它通常会移除无参构造函数——需要同时加上 `@NoArgsConstructor`。
+
+**Q: `save()` 是插入还是 upsert？**
+`save()` 对应 DynamoDB 的 `PutItem`，是 upsert 语义——如果 key 已存在会覆盖整条记录。目前没有 `saveIfNotExists()` API。
+
+**Q: 可以配合 DynamoDB Local 做测试吗？**
+可以。将 `DynamoDbClient` 指向本地端点即可：
+```java
+DynamoDbClient client = DynamoDbClient.builder()
+    .endpointOverride(URI.create("http://localhost:8000"))
+    .region(Region.US_EAST_1)
+    .build();
+DDM ddm = DDM.builder(client).autoCreateTable(true).build();
+```
+
+**Q: 批量操作部分失败怎么办？**
+批量操作会对未处理的项自动重试最多 3 次（指数退避）。如果仍有未处理的项，会抛出 `DynamoBatchException`，其中包含所有单项失败的详情。
+
+---
+
+## 贡献指南
+
+欢迎贡献代码。请遵循以下规范：
+
+1. Fork 仓库，从 `main` 分支创建功能分支
+2. 遵循现有代码风格（Google Java Style）
+3. 为新功能添加测试——运行 `mvn test` 确保全部测试通过
+4. 保持变更聚焦——每个 PR 只做一件事
+5. 如果添加了面向用户的功能，请同步更新 README
+
+### 开发环境
+
+```bash
+git clone https://github.com/game-ark/easy-dynamodb.git
+mvn clean test    # 需要 Java 21+
+```
+
+所有测试使用 Mockito——开发时无需连接真实 DynamoDB。
+
+---
 
 ## License
 

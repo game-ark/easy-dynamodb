@@ -80,6 +80,14 @@ public class ConverterRegistry {
         converters.put(Float.class, floatConverter);
         converters.put(float.class, floatConverter);
 
+        NumberConverter shortConverter = new NumberConverter(Short.class);
+        converters.put(Short.class, shortConverter);
+        converters.put(short.class, shortConverter);
+
+        NumberConverter byteConverter = new NumberConverter(Byte.class);
+        converters.put(Byte.class, byteConverter);
+        converters.put(byte.class, byteConverter);
+
         converters.put(BigDecimal.class, new NumberConverter(BigDecimal.class));
 
         // Boolean — boxed and primitive

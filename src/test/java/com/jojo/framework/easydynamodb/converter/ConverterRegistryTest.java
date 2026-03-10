@@ -40,6 +40,18 @@ class ConverterRegistryTest {
     }
 
     @Test
+    void shouldHaveBuiltinShortConverter() {
+        assertThat(registry.getConverter(Short.class)).isInstanceOf(NumberConverter.class);
+        assertThat(registry.getConverter(short.class)).isInstanceOf(NumberConverter.class);
+    }
+
+    @Test
+    void shouldHaveBuiltinByteConverter() {
+        assertThat(registry.getConverter(Byte.class)).isInstanceOf(NumberConverter.class);
+        assertThat(registry.getConverter(byte.class)).isInstanceOf(NumberConverter.class);
+    }
+
+    @Test
     void shouldHaveBuiltinBooleanConverter() {
         assertThat(registry.getConverter(Boolean.class)).isInstanceOf(BooleanConverter.class);
         assertThat(registry.getConverter(boolean.class)).isInstanceOf(BooleanConverter.class);

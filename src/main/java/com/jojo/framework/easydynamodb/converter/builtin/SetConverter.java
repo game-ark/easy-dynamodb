@@ -22,9 +22,23 @@ public class SetConverter implements AttributeConverter<Set<?>> {
     }
 
     private final SetType setType;
+    private final Class<?> elementType;
 
     public SetConverter(SetType setType) {
+        this(setType, null);
+    }
+
+    /**
+     * Creates a SetConverter with explicit element type for correct deserialization.
+     * For NUMBER_SET, the elementType determines whether values are parsed as
+     * Integer, Long, Double, etc. instead of always returning BigDecimal.
+     *
+     * @param setType     STRING_SET or NUMBER_SET
+     * @param elementType the Java type of set elements (e.g. Integer.class), nullable
+     */
+    public SetConverter(SetType setType, Class<?> elementType) {
         this.setType = setType;
+        this.elementType = elementType;
     }
 
     @Override
@@ -55,10 +69,7 @@ public class SetConverter implements AttributeConverter<Set<?>> {
     public Set<?> fromAttributeValue(AttributeValue attributeValue) {
         // Empty set was stored as NULL
         if (Boolean.TRUE.equals(attributeValue.nul())) {
-            return switch (setType) {
-                case STRING_SET -> new LinkedHashSet<String>();
-                case NUMBER_SET -> new LinkedHashSet<BigDecimal>();
-            };
+            return new LinkedHashSet<>();
         }
         return switch (setType) {
             case STRING_SET -> {
@@ -71,13 +82,27 @@ public class SetConverter implements AttributeConverter<Set<?>> {
             case NUMBER_SET -> {
                 if (attributeValue.hasNs()) {
                     yield attributeValue.ns().stream()
-                            .map(BigDecimal::new)
+                            .map(n -> parseNumber(n, elementType))
                             .collect(Collectors.toCollection(LinkedHashSet::new));
                 }
                 throw new DynamoConversionException("set-field",
                         AttributeValue.class, Set.class);
             }
         };
+    }
+
+    /**
+     * Parses a number string to the correct Java type based on elementType.
+     * Falls back to BigDecimal if elementType is null or unrecognized.
+     */
+    private static Number parseNumber(String n, Class<?> type) {
+        if (type == Integer.class || type == int.class) return Integer.parseInt(n);
+        if (type == Long.class || type == long.class) return Long.parseLong(n);
+        if (type == Double.class || type == double.class) return Double.parseDouble(n);
+        if (type == Float.class || type == float.class) return Float.parseFloat(n);
+        if (type == Short.class || type == short.class) return Short.parseShort(n);
+        if (type == Byte.class || type == byte.class) return Byte.parseByte(n);
+        return new BigDecimal(n);
     }
 
     @Override

@@ -1,5 +1,7 @@
 package com.jojo.framework.easydynamodb.operation;
 
+import com.jojo.framework.easydynamodb.exception.DynamoBatchException;
+import com.jojo.framework.easydynamodb.exception.DynamoBatchException.BatchFailure;
 import com.jojo.framework.easydynamodb.exception.DynamoException;
 import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import com.jojo.framework.easydynamodb.metadata.EntityMetadata;
@@ -28,14 +30,20 @@ import java.util.function.Consumer;
 public class UpdateOperation {
 
     private static final DdmLogger log = DdmLogger.getLogger(UpdateOperation.class);
-    private static final Executor BATCH_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+    private static final Executor DEFAULT_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
 
     private final DynamoDbClient dynamoDbClient;
     private final MetadataRegistry metadataRegistry;
+    private final Executor executor;
 
     public UpdateOperation(DynamoDbClient dynamoDbClient, MetadataRegistry metadataRegistry) {
+        this(dynamoDbClient, metadataRegistry, DEFAULT_EXECUTOR);
+    }
+
+    public UpdateOperation(DynamoDbClient dynamoDbClient, MetadataRegistry metadataRegistry, Executor executor) {
         this.dynamoDbClient = dynamoDbClient;
         this.metadataRegistry = metadataRegistry;
+        this.executor = executor != null ? executor : DEFAULT_EXECUTOR;
     }
 
     /**
@@ -113,50 +121,7 @@ public class UpdateOperation {
      */
     @SuppressWarnings("unchecked")
     public <T> void updateBatch(List<T> entities, Consumer<T> mutator) {
-        if (entities == null || entities.isEmpty()) {
-            log.debug("Batch partial update skipped: empty entity list");
-            return;
-        }
-
-        Class<?> entityClass = entities.get(0).getClass();
-        metadataRegistry.register(entityClass);
-        EntityMetadata metadata = metadataRegistry.getMetadata(entityClass);
-
-        log.debug("Batch partial update: {} entities of type {}", entities.size(), entityClass.getSimpleName());
-
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
-        List<DynamoException> errors = new CopyOnWriteArrayList<>();
-
-        for (T entity : entities) {
-            futures.add(CompletableFuture.runAsync(() -> {
-                try {
-                    update(entity, mutator);
-                } catch (DynamoException e) {
-                    log.warn("Batch partial update: single entity failed for {}: {}",
-                            entityClass.getSimpleName(), e.getMessage());
-                    errors.add(e);
-                }
-            }, BATCH_EXECUTOR));
-        }
-
-        try {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        } catch (java.util.concurrent.CompletionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof DynamoException de) throw de;
-            throw new DynamoException("Batch update failed: " + cause.getMessage(), cause);
-        }
-
-        if (!errors.isEmpty()) {
-            log.error("Batch partial update completed with {}/{} errors for {}",
-                    errors.size(), entities.size(), entityClass.getSimpleName());
-            throw new DynamoException(
-                    "Batch update completed with " + errors.size() + " error(s). First: " + errors.get(0).getMessage(),
-                    errors.get(0));
-        }
-
-        log.trace("Batch partial update completed successfully for {} entities of {}",
-                entities.size(), entityClass.getSimpleName());
+        executeBatchUpdate(entities, entity -> update(entity, mutator), "partial");
     }
 
     /**
@@ -165,29 +130,45 @@ public class UpdateOperation {
      * @param entities the entities to fully update
      */
     public <T> void updateAllBatch(List<T> entities) {
+        executeBatchUpdate(entities, this::updateAll, "full");
+    }
+
+    /**
+     * Shared batch update executor. Parallelizes individual update calls using virtual threads,
+     * collects errors, and throws if any updates failed.
+     *
+     * @param entities  the entities to update
+     * @param action    the update action to apply to each entity
+     * @param opName    operation name for logging ("partial" or "full")
+     */
+    private <T> void executeBatchUpdate(List<T> entities, Consumer<T> action, String opName) {
         if (entities == null || entities.isEmpty()) {
-            log.debug("Batch full update skipped: empty entity list");
+            log.debug("Batch {} update skipped: empty entity list", opName);
             return;
         }
 
         Class<?> entityClass = entities.get(0).getClass();
         metadataRegistry.register(entityClass);
 
-        log.debug("Batch full update: {} entities of type {}", entities.size(), entityClass.getSimpleName());
+        log.debug("Batch {} update: {} entities of type {}", opName, entities.size(), entityClass.getSimpleName());
 
         List<CompletableFuture<Void>> futures = new ArrayList<>();
-        List<DynamoException> errors = new CopyOnWriteArrayList<>();
+        List<BatchFailure> failures = new CopyOnWriteArrayList<>();
+
+        EntityMetadata metadata = metadataRegistry.getMetadata(entityClass);
 
         for (T entity : entities) {
             futures.add(CompletableFuture.runAsync(() -> {
                 try {
-                    updateAll(entity);
+                    action.accept(entity);
                 } catch (DynamoException e) {
-                    log.warn("Batch full update: single entity failed for {}: {}",
-                            entityClass.getSimpleName(), e.getMessage());
-                    errors.add(e);
+                    log.warn("Batch {} update: single entity failed for {}: {}",
+                            opName, entityClass.getSimpleName(), e.getMessage());
+                    // Extract key description for the failure report
+                    String keyDesc = extractKeyDescription(entity, metadata);
+                    failures.add(new BatchFailure(keyDesc, e.getMessage()));
                 }
-            }, BATCH_EXECUTOR));
+            }, executor));
         }
 
         try {
@@ -195,19 +176,17 @@ public class UpdateOperation {
         } catch (java.util.concurrent.CompletionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof DynamoException de) throw de;
-            throw new DynamoException("Batch updateAll failed: " + cause.getMessage(), cause);
+            throw new DynamoException("Batch " + opName + " update failed: " + cause.getMessage(), cause);
         }
 
-        if (!errors.isEmpty()) {
-            log.error("Batch full update completed with {}/{} errors for {}",
-                    errors.size(), entities.size(), entityClass.getSimpleName());
-            throw new DynamoException(
-                    "Batch updateAll completed with " + errors.size() + " error(s). First: " + errors.get(0).getMessage(),
-                    errors.get(0));
+        if (!failures.isEmpty()) {
+            log.error("Batch {} update completed with {}/{} errors for {}",
+                    opName, failures.size(), entities.size(), entityClass.getSimpleName());
+            throw new DynamoBatchException(failures);
         }
 
-        log.trace("Batch full update completed successfully for {} entities of {}",
-                entities.size(), entityClass.getSimpleName());
+        log.trace("Batch {} update completed successfully for {} entities of {}",
+                opName, entities.size(), entityClass.getSimpleName());
     }
 
     // ---- Internal helpers ----
@@ -297,6 +276,25 @@ public class UpdateOperation {
             throw new DynamoException(
                     "Failed to update entity of type " + metadata.getEntityClass().getName()
                             + " in table " + metadata.getTableName() + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Extracts a human-readable key description from an entity for error reporting.
+     */
+    private <T> String extractKeyDescription(T entity, EntityMetadata metadata) {
+        try {
+            FieldMetadata pk = metadata.getPartitionKey();
+            Object pkValue = pk.getValue(entity);
+            String desc = pk.getDynamoAttributeName() + "=" + pkValue;
+            FieldMetadata sk = metadata.getSortKey();
+            if (sk != null) {
+                Object skValue = sk.getValue(entity);
+                desc += ", " + sk.getDynamoAttributeName() + "=" + skValue;
+            }
+            return desc;
+        } catch (Exception e) {
+            return "unknown-key";
         }
     }
 }

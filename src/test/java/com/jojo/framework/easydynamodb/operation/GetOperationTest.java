@@ -88,6 +88,30 @@ class GetOperationTest {
     }
 
     @Test
+    void get_consistentRead_shouldSetOnRequest() {
+        when(dynamoDbClient.getItem(any(GetItemRequest.class)))
+                .thenReturn(GetItemResponse.builder().build());
+
+        getOperation.get(SimpleItem.class, "id-1", null, true);
+
+        ArgumentCaptor<GetItemRequest> captor = ArgumentCaptor.forClass(GetItemRequest.class);
+        verify(dynamoDbClient).getItem(captor.capture());
+        assertThat(captor.getValue().consistentRead()).isTrue();
+    }
+
+    @Test
+    void get_defaultConsistentRead_shouldBeFalse() {
+        when(dynamoDbClient.getItem(any(GetItemRequest.class)))
+                .thenReturn(GetItemResponse.builder().build());
+
+        getOperation.get(SimpleItem.class, "id-1");
+
+        ArgumentCaptor<GetItemRequest> captor = ArgumentCaptor.forClass(GetItemRequest.class);
+        verify(dynamoDbClient).getItem(captor.capture());
+        assertThat(captor.getValue().consistentRead()).isFalse();
+    }
+
+    @Test
     void get_dynamoDbException_shouldWrapInDynamoException() {
         when(dynamoDbClient.getItem(any(GetItemRequest.class)))
                 .thenThrow(DynamoDbException.builder().message("error").build());

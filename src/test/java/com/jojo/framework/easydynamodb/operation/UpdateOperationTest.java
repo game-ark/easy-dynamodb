@@ -1,6 +1,7 @@
 package com.jojo.framework.easydynamodb.operation;
 
 import com.jojo.framework.easydynamodb.converter.ConverterRegistry;
+import com.jojo.framework.easydynamodb.exception.DynamoBatchException;
 import com.jojo.framework.easydynamodb.exception.DynamoException;
 import com.jojo.framework.easydynamodb.metadata.MetadataRegistry;
 import com.jojo.framework.easydynamodb.testmodel.SimpleItem;
@@ -138,5 +139,75 @@ class UpdateOperationTest {
     void updateAllBatch_emptyList_shouldNotCallDynamo() {
         updateOperation.updateAllBatch(java.util.List.of());
         verify(dynamoDbClient, never()).updateItem(any(UpdateItemRequest.class));
+    }
+
+    // ======== Tests for Fix #5: custom executor injection ========
+
+    @Test
+    void updateBatch_withCustomExecutor_shouldUseIt() {
+        when(dynamoDbClient.updateItem(any(UpdateItemRequest.class)))
+                .thenReturn(UpdateItemResponse.builder().build());
+
+        // Use a single-thread executor to verify it's actually used
+        java.util.concurrent.Executor customExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        UpdateOperation customOp = new UpdateOperation(dynamoDbClient, metadataRegistry, customExecutor);
+
+        SimpleItem item = new SimpleItem("id-1", "test", 10);
+        customOp.updateBatch(java.util.List.of(item), e -> e.setName("updated"));
+
+        verify(dynamoDbClient, atLeastOnce()).updateItem(any(UpdateItemRequest.class));
+    }
+
+    @Test
+    void updateOperation_nullExecutor_shouldFallbackToDefault() {
+        when(dynamoDbClient.updateItem(any(UpdateItemRequest.class)))
+                .thenReturn(UpdateItemResponse.builder().build());
+
+        UpdateOperation nullExecOp = new UpdateOperation(dynamoDbClient, metadataRegistry, null);
+
+        SimpleItem item = new SimpleItem("id-1", "test", 10);
+        nullExecOp.updateBatch(java.util.List.of(item), e -> e.setName("updated"));
+
+        verify(dynamoDbClient, atLeastOnce()).updateItem(any(UpdateItemRequest.class));
+    }
+
+    // ======== Tests for Fix #16: DynamoBatchException in updateBatch ========
+
+    @Test
+    void updateBatch_partialFailure_shouldThrowDynamoBatchException() {
+        // First call succeeds, second call fails
+        when(dynamoDbClient.updateItem(any(UpdateItemRequest.class)))
+                .thenReturn(UpdateItemResponse.builder().build())
+                .thenThrow(DynamoDbException.builder().message("throttled").build());
+
+        SimpleItem item1 = new SimpleItem("id-1", "test1", 10);
+        SimpleItem item2 = new SimpleItem("id-2", "test2", 20);
+
+        // Use single-thread executor to ensure deterministic ordering
+        java.util.concurrent.Executor singleThread = Runnable::run;
+        UpdateOperation singleOp = new UpdateOperation(dynamoDbClient, metadataRegistry, singleThread);
+
+        assertThatThrownBy(() -> singleOp.updateBatch(java.util.List.of(item1, item2), e -> e.setName("new")))
+                .isInstanceOf(DynamoBatchException.class)
+                .isInstanceOf(DynamoException.class); // backward compatible
+    }
+
+    @Test
+    void updateBatch_allFail_shouldCollectAllFailures() {
+        when(dynamoDbClient.updateItem(any(UpdateItemRequest.class)))
+                .thenThrow(DynamoDbException.builder().message("error").build());
+
+        SimpleItem item1 = new SimpleItem("id-1", "test1", 10);
+        SimpleItem item2 = new SimpleItem("id-2", "test2", 20);
+
+        java.util.concurrent.Executor singleThread = Runnable::run;
+        UpdateOperation singleOp = new UpdateOperation(dynamoDbClient, metadataRegistry, singleThread);
+
+        assertThatThrownBy(() -> singleOp.updateBatch(java.util.List.of(item1, item2), e -> e.setName("new")))
+                .isInstanceOf(DynamoBatchException.class)
+                .satisfies(ex -> {
+                    DynamoBatchException batchEx = (DynamoBatchException) ex;
+                    assertThat(batchEx.getFailures()).hasSize(2);
+                });
     }
 }

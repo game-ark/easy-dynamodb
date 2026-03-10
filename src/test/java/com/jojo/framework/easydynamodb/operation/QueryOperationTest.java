@@ -100,6 +100,107 @@ class QueryOperationTest {
     }
 
     @Test
+    void query_valueShorthand_shouldAutoConvert() {
+        QueryResponse response = QueryResponse.builder().items(List.of()).build();
+        when(dynamoDbClient.query(any(QueryRequest.class))).thenReturn(response);
+
+        queryOperation.query(GameItem.class)
+                .keyCondition("game_id = :pk AND title = :title")
+                .value(":pk", "g1")
+                .value(":title", "Zelda")
+                .execute();
+
+        ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
+        verify(dynamoDbClient).query(captor.capture());
+        Map<String, AttributeValue> values = captor.getValue().expressionAttributeValues();
+        assertThat(values.get(":pk").s()).isEqualTo("g1");
+        assertThat(values.get(":title").s()).isEqualTo("Zelda");
+    }
+
+    @Test
+    void query_valueShorthand_withNumber_shouldAutoConvert() {
+        QueryResponse response = QueryResponse.builder().items(List.of()).build();
+        when(dynamoDbClient.query(any(QueryRequest.class))).thenReturn(response);
+
+        queryOperation.query(GameItem.class)
+                .keyCondition("game_id = :pk")
+                .value(":pk", "g1")
+                .filter("rating > :min")
+                .value(":min", 9.0)
+                .execute();
+
+        ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
+        verify(dynamoDbClient).query(captor.capture());
+        assertThat(captor.getValue().expressionAttributeValues().get(":min").n()).isEqualTo("9.0");
+    }
+
+    @Test
+    void query_valueMixedWithExpressionValues_shouldMerge() {
+        QueryResponse response = QueryResponse.builder().items(List.of()).build();
+        when(dynamoDbClient.query(any(QueryRequest.class))).thenReturn(response);
+
+        queryOperation.query(GameItem.class)
+                .keyCondition("game_id = :pk")
+                .expressionValues(Map.of(":pk", AttributeValue.builder().s("g1").build()))
+                .value(":extra", "bonus")
+                .execute();
+
+        ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
+        verify(dynamoDbClient).query(captor.capture());
+        Map<String, AttributeValue> values = captor.getValue().expressionAttributeValues();
+        assertThat(values).containsKey(":pk");
+        assertThat(values).containsKey(":extra");
+    }
+
+    @Test
+    void query_consistentRead_shouldSetOnRequest() {
+        QueryResponse response = QueryResponse.builder().items(List.of()).build();
+        when(dynamoDbClient.query(any(QueryRequest.class))).thenReturn(response);
+
+        queryOperation.query(GameItem.class)
+                .keyCondition("game_id = :pk")
+                .value(":pk", "g1")
+                .consistentRead(true)
+                .execute();
+
+        ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
+        verify(dynamoDbClient).query(captor.capture());
+        assertThat(captor.getValue().consistentRead()).isTrue();
+    }
+
+    @Test
+    void query_projection_shouldSetOnRequest() {
+        QueryResponse response = QueryResponse.builder().items(List.of()).build();
+        when(dynamoDbClient.query(any(QueryRequest.class))).thenReturn(response);
+
+        queryOperation.query(GameItem.class)
+                .keyCondition("game_id = :pk")
+                .value(":pk", "g1")
+                .projection("game_id, title, rating")
+                .execute();
+
+        ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
+        verify(dynamoDbClient).query(captor.capture());
+        assertThat(captor.getValue().projectionExpression()).isEqualTo("game_id, title, rating");
+    }
+
+    @Test
+    void query_defaultConsistentRead_shouldNotBeSet() {
+        QueryResponse response = QueryResponse.builder().items(List.of()).build();
+        when(dynamoDbClient.query(any(QueryRequest.class))).thenReturn(response);
+
+        queryOperation.query(GameItem.class)
+                .keyCondition("game_id = :pk")
+                .value(":pk", "g1")
+                .execute();
+
+        ArgumentCaptor<QueryRequest> captor = ArgumentCaptor.forClass(QueryRequest.class);
+        verify(dynamoDbClient).query(captor.capture());
+        // When not set, should be null (DynamoDB defaults to false)
+        assertThat(captor.getValue().consistentRead()).isNull();
+    }
+
+    @Test
     void queryResult_hasMorePages_shouldReflectLastEvaluatedKey() {
         var result = new QueryOperation.QueryResult<>(List.of(), Map.of("pk", AttributeValue.builder().s("x").build()));
         assertThat(result.hasMorePages()).isTrue();

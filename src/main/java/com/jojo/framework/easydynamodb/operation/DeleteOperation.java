@@ -20,6 +20,8 @@ import java.util.Map;
 public class DeleteOperation {
 
     private static final DdmLogger log = DdmLogger.getLogger(DeleteOperation.class);
+    private static final int MAX_RETRIES = 3;
+    private static final long INITIAL_BACKOFF_MS = 100;
 
     private final DynamoDbClient dynamoDbClient;
     private final MetadataRegistry metadataRegistry;
@@ -128,7 +130,7 @@ public class DeleteOperation {
 
                 log.debug("deleteByCondition scan page returned {} items for table={}", keysToDelete.size(), tableName);
 
-                // Batch delete in chunks of 25
+                // Batch delete in chunks of 25 with retry
                 for (int i = 0; i < keysToDelete.size(); i += 25) {
                     List<KeyPair> chunk = keysToDelete.subList(i, Math.min(i + 25, keysToDelete.size()));
                     List<WriteRequest> writeRequests = new ArrayList<>();
@@ -140,12 +142,10 @@ public class DeleteOperation {
                     }
 
                     try {
-                        dynamoDbClient.batchWriteItem(BatchWriteItemRequest.builder()
-                                .requestItems(Map.of(tableName, writeRequests))
-                                .build());
-                        totalDeleted += chunk.size();
+                        int deletedInChunk = executeBatchDeleteWithRetry(tableName, writeRequests, chunk.size());
+                        totalDeleted += deletedInChunk;
                         log.trace("deleteByCondition batch deleted {} items from table={}, totalDeleted={}",
-                                chunk.size(), tableName, totalDeleted);
+                                deletedInChunk, tableName, totalDeleted);
                     } catch (DynamoDbException e) {
                         log.error("Batch delete in deleteByCondition failed on table={} after deleting {} items: {}",
                                 tableName, totalDeleted, e.getMessage());
@@ -162,5 +162,53 @@ public class DeleteOperation {
 
         log.info("deleteByCondition completed: deleted {} items from table={}", totalDeleted, tableName);
         return totalDeleted;
+    }
+
+    /**
+     * Executes a batch delete with retry for unprocessed items.
+     * Returns the number of items actually deleted.
+     */
+    private int executeBatchDeleteWithRetry(String tableName, List<WriteRequest> writeRequests, int totalInChunk) {
+        Map<String, List<WriteRequest>> remaining = Map.of(tableName, writeRequests);
+
+        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            BatchWriteItemResponse response = dynamoDbClient.batchWriteItem(
+                    BatchWriteItemRequest.builder()
+                            .requestItems(remaining)
+                            .build());
+
+            if (!response.hasUnprocessedItems() || response.unprocessedItems().isEmpty()) {
+                return totalInChunk;
+            }
+
+            List<WriteRequest> unprocessed = response.unprocessedItems().get(tableName);
+            if (unprocessed == null || unprocessed.isEmpty()) {
+                return totalInChunk;
+            }
+
+            int unprocessedCount = unprocessed.size();
+            remaining = Map.of(tableName, unprocessed);
+
+            if (attempt < MAX_RETRIES) {
+                log.warn("deleteByCondition: {} unprocessed items, retrying (attempt {}/{})",
+                        unprocessedCount, attempt + 1, MAX_RETRIES);
+                backoff(attempt);
+            } else {
+                log.warn("deleteByCondition: {} items remained unprocessed after {} retries on table={}",
+                        unprocessedCount, MAX_RETRIES, tableName);
+                return totalInChunk - unprocessedCount;
+            }
+        }
+
+        return totalInChunk;
+    }
+
+    private void backoff(int attempt) {
+        try {
+            long sleepMs = INITIAL_BACKOFF_MS * (1L << attempt);
+            Thread.sleep(sleepMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
