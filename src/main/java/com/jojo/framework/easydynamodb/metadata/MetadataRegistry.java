@@ -4,8 +4,11 @@ import com.jojo.framework.easydynamodb.annotation.DynamoConverter;
 import com.jojo.framework.easydynamodb.annotation.DynamoTable;
 import com.jojo.framework.easydynamodb.converter.AttributeConverter;
 import com.jojo.framework.easydynamodb.converter.ConverterRegistry;
+import com.jojo.framework.easydynamodb.converter.builtin.EnumConverter;
+import com.jojo.framework.easydynamodb.converter.builtin.NestedEntityConverter;
 import com.jojo.framework.easydynamodb.converter.builtin.SetConverter;
 import com.jojo.framework.easydynamodb.exception.DynamoConfigException;
+import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbAttribute;
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbBean;
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbIgnore;
@@ -37,6 +40,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class MetadataRegistry {
 
+    private static final DdmLogger log = DdmLogger.getLogger(MetadataRegistry.class);
+
     private final Map<Class<?>, EntityMetadata> cache = new ConcurrentHashMap<>();
     private final ConverterRegistry converterRegistry;
     private final String tablePrefix;
@@ -53,7 +58,12 @@ public class MetadataRegistry {
     }
 
     public void register(Class<?> entityClass) {
-        cache.computeIfAbsent(entityClass, this::parseEntityClass);
+        cache.computeIfAbsent(entityClass, clazz -> {
+            log.debug("Parsing entity class: {}", clazz.getName());
+            EntityMetadata metadata = parseEntityClass(clazz);
+            log.info("Registered entity: {} -> table={}", clazz.getSimpleName(), metadata.getTableName());
+            return metadata;
+        });
     }
 
     public EntityMetadata getMetadata(Class<?> entityClass) {
@@ -75,6 +85,7 @@ public class MetadataRegistry {
     private EntityMetadata parseEntityClass(Class<?> entityClass) {
         String rawTableName = resolveTableName(entityClass);
         String tableName = tableNameResolver.resolve(rawTableName, tablePrefix);
+        log.trace("Parsing entity {}: rawTableName={}, resolvedTableName={}", entityClass.getSimpleName(), rawTableName, tableName);
 
         List<Field> allFields = collectAllFields(entityClass);
 
@@ -87,7 +98,15 @@ public class MetadataRegistry {
         Map<String, FieldMetadata> gsiPartitionKeys = new LinkedHashMap<>();
         Map<String, FieldMetadata> gsiSortKeys = new LinkedHashMap<>();
 
-        MethodHandles.Lookup lookup = MethodHandles.lookup();
+        MethodHandles.Lookup lookup;
+        try {
+            // Use privateLookupIn to get full access to the entity class,
+            // which works correctly across module boundaries in Java 17+.
+            lookup = MethodHandles.privateLookupIn(entityClass, MethodHandles.lookup());
+        } catch (IllegalAccessException e) {
+            // Fallback for restricted modules — use caller's lookup
+            lookup = MethodHandles.lookup();
+        }
 
         for (Field field : allFields) {
             int modifiers = field.getModifiers();
@@ -156,7 +175,17 @@ public class MetadataRegistry {
                                 + "A GSI must have a @DynamoDbSecondaryPartitionKey.");
             }
             gsiList.add(new GsiMetadata(indexName, gsiPk, gsiSk));
+            log.trace("Parsed GSI '{}' for entity {}: pk={}, sk={}",
+                    indexName, entityClass.getSimpleName(),
+                    gsiPk.getDynamoAttributeName(),
+                    gsiSk != null ? gsiSk.getDynamoAttributeName() : "none");
         }
+
+        log.debug("Entity {} parsed: table={}, fields={}, pk={}, sk={}, gsiCount={}",
+                entityClass.getSimpleName(), tableName, fields.size(),
+                partitionKey.getDynamoAttributeName(),
+                sortKey != null ? sortKey.getDynamoAttributeName() : "none",
+                gsiList.size());
 
         return new EntityMetadata(entityClass, tableName, partitionKey, sortKey, fields, fieldByAttributeName, gsiList);
     }
@@ -277,9 +306,12 @@ public class MetadataRegistry {
         }
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private AttributeConverter<?> resolveConverter(Field field, Class<?> fieldType, Type genericType) {
         DynamoConverter converterAnnotation = field.getAnnotation(DynamoConverter.class);
         if (converterAnnotation != null) {
+            log.trace("Using custom @DynamoConverter for field '{}': {}",
+                    field.getName(), converterAnnotation.value().getSimpleName());
             return instantiateConverter(converterAnnotation.value(), field.getName());
         }
 
@@ -292,10 +324,61 @@ public class MetadataRegistry {
             return converter;
         }
 
+        // Auto-detect Enum types
+        if (fieldType.isEnum()) {
+            log.debug("Auto-detected Enum type for field '{}': {}", field.getName(), fieldType.getSimpleName());
+            EnumConverter<?> enumConverter = new EnumConverter<>((Class) fieldType);
+            converterRegistry.register(fieldType, enumConverter);
+            return enumConverter;
+        }
+
+        // Auto-detect nested entity types (annotated with @DynamoTable or @DynamoDbBean)
+        if (fieldType.isAnnotationPresent(DynamoTable.class)
+                || fieldType.isAnnotationPresent(DynamoDbBean.class)) {
+            log.debug("Auto-detected nested entity for field '{}': {}", field.getName(), fieldType.getSimpleName());
+            // Eagerly register the nested entity so its metadata is available
+            register(fieldType);
+            EntityMetadata nestedMetadata = getMetadata(fieldType);
+
+            NestedEntityConverter<?> nestedConverter = createNestedEntityConverter(fieldType, nestedMetadata);
+            converterRegistry.register(fieldType, nestedConverter);
+            return nestedConverter;
+        }
+
         throw new DynamoConfigException(
                 "No converter found for field '" + field.getName()
                         + "' of type " + fieldType.getName()
                         + ". Register a custom converter or annotate with @DynamoConverter.");
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> NestedEntityConverter<T> createNestedEntityConverter(Class<T> entityClass,
+                                                                      EntityMetadata metadata) {
+        return new NestedEntityConverter<>(
+                entityClass,
+                entity -> {
+                    java.util.Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> map
+                            = new java.util.LinkedHashMap<>();
+                    for (FieldMetadata fm : metadata.getFields()) {
+                        Object value = fm.getValue(entity);
+                        if (value != null) {
+                            map.put(fm.getDynamoAttributeName(), fm.toAttributeValue(value));
+                        }
+                    }
+                    return map;
+                },
+                avMap -> {
+                    T instance = (T) metadata.newInstance();
+                    for (FieldMetadata fm : metadata.getFields()) {
+                        software.amazon.awssdk.services.dynamodb.model.AttributeValue av
+                                = avMap.get(fm.getDynamoAttributeName());
+                        if (av != null) {
+                            fm.setValue(instance, fm.fromAttributeValue(av));
+                        }
+                    }
+                    return instance;
+                }
+        );
     }
 
     private AttributeConverter<?> instantiateConverter(Class<? extends AttributeConverter<?>> converterClass,

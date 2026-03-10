@@ -1,6 +1,7 @@
 package com.jojo.framework.easydynamodb.operation;
 
 import com.jojo.framework.easydynamodb.exception.DynamoException;
+import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import com.jojo.framework.easydynamodb.metadata.EntityMetadata;
 import com.jojo.framework.easydynamodb.metadata.FieldMetadata;
 import com.jojo.framework.easydynamodb.metadata.MetadataRegistry;
@@ -10,7 +11,6 @@ import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -18,6 +18,8 @@ import java.util.Map;
  * GetItem request, and converting the response back to a Java entity.
  */
 public class GetOperation {
+
+    private static final DdmLogger log = DdmLogger.getLogger(GetOperation.class);
 
     private final DynamoDbClient dynamoDbClient;
     private final MetadataRegistry metadataRegistry;
@@ -37,7 +39,8 @@ public class GetOperation {
         metadataRegistry.register(clazz);
         EntityMetadata metadata = metadataRegistry.getMetadata(clazz);
 
-        Map<String, AttributeValue> keyMap = buildKeyMap(metadata, partitionKey, sortKey);
+        Map<String, AttributeValue> keyMap = KeyBuilder.buildKeyMap(metadata, partitionKey, sortKey);
+        log.debug("GetItem from table={}, key={}", metadata.getTableName(), keyMap);
 
         try {
             GetItemResponse response = dynamoDbClient.getItem(GetItemRequest.builder()
@@ -46,12 +49,15 @@ public class GetOperation {
                     .build());
 
             if (!response.hasItem() || response.item().isEmpty()) {
+                log.debug("GetItem returned no item for table={}", metadata.getTableName());
                 return null;
             }
 
             Map<String, AttributeValue> rawItem = response.item();
+            log.trace("GetItem raw response: {} attributes", rawItem.size());
             return (T) fromAttributeValueMap(rawItem, metadata);
         } catch (DynamoDbException e) {
+            log.error("GetItem failed for table={}: {}", metadata.getTableName(), e.getMessage());
             throw new DynamoException(
                     "Failed to get entity of type " + clazz.getName()
                             + " from table " + metadata.getTableName() + ": " + e.getMessage(), e);
@@ -77,24 +83,5 @@ public class GetOperation {
         return entity;
     }
 
-    private Map<String, AttributeValue> buildKeyMap(EntityMetadata metadata,
-                                                     Object partitionKey,
-                                                     Object sortKey) {
-        Map<String, AttributeValue> keyMap = new HashMap<>();
 
-        FieldMetadata pkField = metadata.getPartitionKey();
-        keyMap.put(pkField.getDynamoAttributeName(), pkField.toAttributeValue(partitionKey));
-
-        if (sortKey != null) {
-            FieldMetadata skField = metadata.getSortKey();
-            if (skField == null) {
-                throw new DynamoException(
-                        "Sort key provided but entity " + metadata.getEntityClass().getName()
-                                + " does not define a @DynamoDbSortKey field");
-            }
-            keyMap.put(skField.getDynamoAttributeName(), skField.toAttributeValue(sortKey));
-        }
-
-        return keyMap;
-    }
 }

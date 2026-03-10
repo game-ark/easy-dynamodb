@@ -1,6 +1,7 @@
 package com.jojo.framework.easydynamodb.operation;
 
 import com.jojo.framework.easydynamodb.exception.DynamoException;
+import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import com.jojo.framework.easydynamodb.metadata.EntityMetadata;
 import com.jojo.framework.easydynamodb.metadata.FieldMetadata;
 import com.jojo.framework.easydynamodb.metadata.GsiMetadata;
@@ -21,6 +22,8 @@ import java.util.Set;
  */
 public class TableCreateOperation {
 
+    private static final DdmLogger log = DdmLogger.getLogger(TableCreateOperation.class);
+
     private final DynamoDbClient dynamoDbClient;
 
     public TableCreateOperation(DynamoDbClient dynamoDbClient) {
@@ -35,6 +38,7 @@ public class TableCreateOperation {
      */
     public void createTable(EntityMetadata metadata) {
         String tableName = metadata.getTableName();
+        log.info("Creating table: {}", tableName);
         FieldMetadata pk = metadata.getPartitionKey();
         FieldMetadata sk = metadata.getSortKey();
 
@@ -113,22 +117,32 @@ public class TableCreateOperation {
 
         if (!gsiList.isEmpty()) {
             requestBuilder.globalSecondaryIndexes(gsiList);
+            log.debug("Table {} will be created with {} GSI(s)", tableName, gsiList.size());
         }
 
         CreateTableRequest request = requestBuilder.build();
 
         try {
             dynamoDbClient.createTable(request);
-
-            try (DynamoDbWaiter waiter = DynamoDbWaiter.builder().client(dynamoDbClient).build()) {
-                waiter.waitUntilTableExists(b -> b.tableName(tableName));
-            }
+            log.info("CreateTable request sent for: {}", tableName);
+        } catch (ResourceInUseException e) {
+            log.debug("Table {} already exists (concurrent creation), waiting for ACTIVE", tableName);
         } catch (DynamoException e) {
             // Don't double-wrap our own exceptions
             throw e;
         } catch (Exception e) {
+            log.error("Failed to create table {}: {}", tableName, e.getMessage());
             throw new DynamoException(
                     "Failed to create table " + tableName + ": " + e.getMessage(), e);
+        }
+
+        try (DynamoDbWaiter waiter = DynamoDbWaiter.builder().client(dynamoDbClient).build()) {
+            waiter.waitUntilTableExists(b -> b.tableName(tableName));
+            log.info("Table {} is now ACTIVE", tableName);
+        } catch (Exception e) {
+            log.error("Failed waiting for table {} to become ACTIVE: {}", tableName, e.getMessage());
+            throw new DynamoException(
+                    "Failed waiting for table " + tableName + " to become ACTIVE: " + e.getMessage(), e);
         }
     }
 

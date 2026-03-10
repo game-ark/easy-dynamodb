@@ -30,8 +30,10 @@ public class SetConverter implements AttributeConverter<Set<?>> {
     @Override
     public AttributeValue toAttributeValue(Set<?> value) {
         if (value.isEmpty()) {
-            // DynamoDB does not allow empty sets; store as empty list instead
-            return AttributeValue.builder().l(java.util.Collections.emptyList()).build();
+            // Store empty sets as NULL with a convention marker.
+            // DynamoDB does not allow empty SS/NS, and using empty L is ambiguous
+            // with actual empty lists. NULL is the safest representation.
+            return AttributeValue.builder().nul(true).build();
         }
         return switch (setType) {
             case STRING_SET -> {
@@ -51,14 +53,17 @@ public class SetConverter implements AttributeConverter<Set<?>> {
 
     @Override
     public Set<?> fromAttributeValue(AttributeValue attributeValue) {
+        // Empty set was stored as NULL
+        if (Boolean.TRUE.equals(attributeValue.nul())) {
+            return switch (setType) {
+                case STRING_SET -> new LinkedHashSet<String>();
+                case NUMBER_SET -> new LinkedHashSet<BigDecimal>();
+            };
+        }
         return switch (setType) {
             case STRING_SET -> {
                 if (attributeValue.hasSs()) {
                     yield new LinkedHashSet<>(attributeValue.ss());
-                }
-                // Handle empty set stored as empty list
-                if (attributeValue.hasL() && attributeValue.l().isEmpty()) {
-                    yield new LinkedHashSet<String>();
                 }
                 throw new DynamoConversionException("set-field",
                         AttributeValue.class, Set.class);
@@ -68,10 +73,6 @@ public class SetConverter implements AttributeConverter<Set<?>> {
                     yield attributeValue.ns().stream()
                             .map(BigDecimal::new)
                             .collect(Collectors.toCollection(LinkedHashSet::new));
-                }
-                // Handle empty set stored as empty list
-                if (attributeValue.hasL() && attributeValue.l().isEmpty()) {
-                    yield new LinkedHashSet<BigDecimal>();
                 }
                 throw new DynamoConversionException("set-field",
                         AttributeValue.class, Set.class);

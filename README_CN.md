@@ -13,7 +13,11 @@ DDM ddm = DDM.builder(client)
 ddm.save(user);                                    // 保存
 User user = ddm.get(User.class, "user-001");       // 获取
 ddm.update(user, u -> u.setName("新名字"));          // 部分更新
-ddm.saveBatch(userList);                           // 批量保存
+ddm.delete(User.class, "user-001");                // 删除
+List<User> users = ddm.query(User.class)           // 条件查询
+    .keyCondition("pk = :pk")
+    .expressionValues(Map.of(":pk", AttributeValue.builder().s("user-001").build()))
+    .executeAll();
 ```
 
 ## 环境要求
@@ -33,41 +37,49 @@ ddm.saveBatch(userList);                           // 批量保存
 
 ---
 
-## 完整示例
+## 核心 API 一览
 
-以一个游戏数据表为例，演示所有核心功能。
+| 分类 | 方法 | 说明 |
+|------|------|------|
+| 新增 | `save(entity)` | 保存单条 |
+| 新增 | `saveBatch(list)` | 批量保存（25条/批，并行） |
+| 查询 | `get(Class, pk)` / `get(Class, pk, sk)` | 按主键精确获取 |
+| 查询 | `getBatch(Class, keys)` | 按主键批量获取（100条/批，并行） |
+| 查询 | `query(Class)` | 条件查询（范围条件、GSI、过滤、分页） |
+| 查询 | `scan(Class)` | 全表扫描（过滤、分页） |
+| 更新 | `update(entity, mutator)` | 部分更新（仅变更字段） |
+| 更新 | `updateAll(entity)` | 全量更新 |
+| 更新 | `updateBatch(list, mutator)` | 批量部分更新（并行） |
+| 更新 | `updateAllBatch(list)` | 批量全量更新（并行） |
+| 删除 | `delete(Class, pk)` / `delete(Class, pk, sk)` | 按主键删除 |
+| 删除 | `deleteBatch(Class, keys)` | 按主键批量删除（25条/批，并行） |
+| 删除 | `deleteByCondition(Class, filter, values, names)` | 按条件删除，返回删除条数 |
+
+---
+
+## 完整示例
 
 ### 1. 定义实体
 
 ```java
-import com.jojo.framework.easydynamodb.annotation.DynamoTable;
-import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.*;
-import java.util.List;
-
 @DynamoTable("game")
 public class Game {
-
     private String gameId;
     private String version;
     private String title;
     private String genre;
     private Double rating;
-    private Integer playerCount;
-    private List<String> tags;
-    private String internalNote;
+    private GameStatus status;       // 枚举 - 自动转换
+    private GameDetail detail;       // 嵌套实体 - 自动转换
 
-    // ---- 主键 ----
-
-    @DynamoDbPartitionKey                          // 分区键（必须）
-    @DynamoDbAttribute("game_id")                  // 自定义 DynamoDB 属性名
+    @DynamoDbPartitionKey
+    @DynamoDbAttribute("game_id")
     public String getGameId() { return gameId; }
     public void setGameId(String gameId) { this.gameId = gameId; }
 
-    @DynamoDbSortKey                               // 排序键（可选）
+    @DynamoDbSortKey
     public String getVersion() { return version; }
     public void setVersion(String version) { this.version = version; }
-
-    // ---- GSI（全局二级索引）----
 
     @DynamoDbSecondaryPartitionKey(indexNames = "genre-rating-index")
     public String getGenre() { return genre; }
@@ -77,337 +89,320 @@ public class Game {
     public Double getRating() { return rating; }
     public void setRating(Double rating) { this.rating = rating; }
 
-    // ---- 普通字段 ----
+    // ... 其他 getter/setter
 
-    public String getTitle() { return title; }
-    public void setTitle(String title) { this.title = title; }
-
-    public Integer getPlayerCount() { return playerCount; }
-    public void setPlayerCount(Integer playerCount) { this.playerCount = playerCount; }
-
-    public List<String> getTags() { return tags; }
-    public void setTags(List<String> tags) { this.tags = tags; }
-
-    // ---- 忽略字段 ----
-
-    @DynamoDbIgnore                                // 不写入 DynamoDB
+    @DynamoDbIgnore
     public String getInternalNote() { return internalNote; }
-    public void setInternalNote(String internalNote) { this.internalNote = internalNote; }
 }
 ```
+
+要点说明：
+- `@DynamoTable("game")` - 映射到 DynamoDB 表名 `game`。省略或留空时默认使用类名。
+- `@DynamoDbPartitionKey` / `@DynamoDbSortKey` - 标注在 getter 上。分区键必须有且仅有一个，排序键可选。
+- `@DynamoDbAttribute("game_id")` - 自定义 DynamoDB 属性名。省略时使用 Java 字段名。
+- `@DynamoDbIgnore` - 标注在 getter 上，该字段不参与 DynamoDB 映射。
+- `@DynamoDbSecondaryPartitionKey` / `@DynamoDbSecondarySortKey` - GSI 键定义，标注在 getter 上。
+
+嵌套实体（如上面的 `GameDetail`）只要标注了 `@DynamoTable` 或 `@DynamoDbBean`，就会被自动检测并以 DynamoDB Map（M）类型存储。
 
 ### 2. 初始化 DDM
 
 ```java
-import com.jojo.framework.easydynamodb.DDM;
-import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-
-DynamoDbClient client = DynamoDbClient.create();
-
-// 方式一：快速创建（全部默认配置）
-DDM ddm = DDM.create(client);
-
-// 方式二：Builder 自定义配置
 DDM ddm = DDM.builder(client)
-    .tablePrefix("prod_")              // 所有表名加前缀 → "prod_game"
-    .autoCreateTable(true)             // 首次 save 时自动建表（默认关闭）
-    .register(Game.class)              // 预注册实体（也可以不注册，首次操作时自动注册）
+    .tablePrefix("prod_")           // 表名前缀（如 "prod_game"）
+    .autoCreateTable(true)          // 首次 save 时自动建表
+    .register(Game.class)           // 预注册实体（可选，首次使用时也会自动注册）
+    .enableLogging(true)            // 开启内部日志（默认关闭）
+    .logLevel(Level.DEBUG)          // 日志级别：TRACE/DEBUG/INFO/WARN/ERROR（默认 INFO）
     .build();
+```
+
+#### Builder 配置项
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `tablePrefix(String)` | `""` | 表名前缀，拼接在所有表名之前 |
+| `autoCreateTable(boolean)` | `false` | 首次 save 时若表不存在则自动创建（PAY_PER_REQUEST 计费模式） |
+| `register(Class<?>...)` | - | 在 build 时预注册实体类 |
+| `registerConverter(Class, converter)` | - | 注册全局自定义类型转换器 |
+| `tableNameResolver(TableNameResolver)` | `prefix + tableName` | 自定义表名解析策略 |
+| `batchExecutor(Executor)` | 虚拟线程 | 自定义批量操作的并行执行器 |
+| `enableLogging(boolean)` | `false` | 开启/关闭内部日志（基于 SLF4J） |
+| `logLevel(Level)` | `INFO` | 最低日志级别（仅在日志开启时生效） |
+
+#### 自定义表名解析器
+
+继承 `TableNameResolver` 可实现高级表名策略（如多租户）：
+
+```java
+public class TenantTableNameResolver extends TableNameResolver {
+    private final String tenantId;
+
+    public TenantTableNameResolver(String tenantId) {
+        this.tenantId = tenantId;
+    }
+
+    @Override
+    public String resolve(String tableName, String prefix) {
+        return prefix + tenantId + "_" + tableName;
+    }
+}
+
+DDM ddm = DDM.builder(client)
+    .tablePrefix("prod_")
+    .tableNameResolver(new TenantTableNameResolver("tenant-42"))
+    .build();
+// 最终表名: "prod_tenant-42_game"
 ```
 
 ### 3. 保存
 
 ```java
-Game game = new Game();
-game.setGameId("zelda-001");
-game.setVersion("v1.0");
-game.setTitle("塞尔达传说");
-game.setGenre("RPG");
-game.setRating(9.8);
-game.setPlayerCount(1);
-game.setTags(List.of("adventure", "openworld"));
-
-// 保存单条（null 字段自动跳过，不写入 DynamoDB）
-ddm.save(game);
-
-// 批量保存（超过 25 条自动分批，并行执行）
-ddm.saveBatch(gameList);
+ddm.save(game);              // 单条保存
+ddm.saveBatch(gameList);     // 批量保存（25条/批，并行）
 ```
 
-### 4. 获取
+当设置了 `autoCreateTable(true)` 时，首次 `save()` 如果表不存在，会自动创建表（PAY_PER_REQUEST 计费，包含所有 GSI），然后重试保存。
+
+### 4. 查询
 
 ```java
-// 仅分区键
-Game game = ddm.get(Game.class, "zelda-001");
-
-// 分区键 + 排序键
+// 精确主键查询（GetItem - O(1)，最便宜）
 Game game = ddm.get(Game.class, "zelda-001", "v1.0");
 
-// 不存在返回 null
-Game notFound = ddm.get(Game.class, "xxx", "v0");  // → null
-
-// 批量获取（超过 100 条自动分批，并行执行）
+// 批量主键查询（BatchGetItem - 100条/批）
 List<Game> games = ddm.getBatch(Game.class, List.of(
     new KeyPair("zelda-001", "v1.0"),
     new KeyPair("mario-001", "v2.0")
 ));
 ```
 
-### 5. 部分更新
+`KeyPair` 接受 `(partitionKey, sortKey)` 或仅 `(partitionKey)`（用于没有排序键的表）。
 
 ```java
-Game game = new Game();
-game.setGameId("zelda-001");
-game.setVersion("v1.0");
+// 条件查询（Query - 支持范围条件、GSI、排序、分页）
+List<Game> rpgGames = ddm.query(Game.class)
+    .index("genre-rating-index")
+    .keyCondition("genre = :genre AND rating > :min")
+    .expressionValues(Map.of(
+        ":genre", AttributeValue.builder().s("RPG").build(),
+        ":min", AttributeValue.builder().n("9.0").build()
+    ))
+    .descending()
+    .limit(10)
+    .executeAll();
 
-// 只更新指定字段，其他字段不受影响
+// 全表扫描
+List<Game> all = ddm.scan(Game.class)
+    .filter("rating > :min")
+    .expressionValues(Map.of(":min", AttributeValue.builder().n("9.0").build()))
+    .executeAll();
+```
+
+> `get` vs `query`：`get` 是 O(1) 精确主键查找（最便宜）。`query` 支持范围条件、GSI、排序和分页——需要按条件查找多条记录时使用。
+
+#### 分页
+
+`query()` 和 `scan()` 都支持两种执行模式：
+
+- `executeAll()` - 自动翻页，返回所有匹配项的 `List<T>`。
+- `execute()` - 返回单页结果 `QueryResult<T>`，包含 `items()` 和 `lastEvaluatedKey()`，用于手动分页。
+
+```java
+// 手动分页
+QueryOperation.QueryResult<Game> page = ddm.query(Game.class)
+    .keyCondition("genre = :genre")
+    .expressionValues(Map.of(":genre", AttributeValue.builder().s("RPG").build()))
+    .limit(20)
+    .execute();
+
+List<Game> items = page.items();
+boolean hasMore = page.hasMorePages();
+
+// 获取下一页
+if (hasMore) {
+    QueryOperation.QueryResult<Game> nextPage = ddm.query(Game.class)
+        .keyCondition("genre = :genre")
+        .expressionValues(Map.of(":genre", AttributeValue.builder().s("RPG").build()))
+        .limit(20)
+        .startKey(page.lastEvaluatedKey())
+        .execute();
+}
+```
+
+### 5. 更新
+
+```java
+// 部分更新 - 只发送变更字段
 ddm.update(game, g -> {
-    g.setTitle("塞尔达传说：王国之泪");
+    g.setTitle("塞尔达：王国之泪");
     g.setRating(9.9);
 });
 
-// 全量更新（所有非 null 非键字段）
-game.setTitle("塞尔达传说：王国之泪");
-game.setRating(9.9);
-game.setPlayerCount(1);
+// 全量更新 - 非 null 字段 SET，null 字段 REMOVE
 ddm.updateAll(game);
+
+// 批量部分更新（并行）
+ddm.updateBatch(gameList, g -> g.setStatus(GameStatus.ARCHIVED));
+
+// 批量全量更新（并行）
+ddm.updateAllBatch(gameList);
 ```
 
-> `update` 内部原理：创建一个只含主键的空对象 → 传给你的 lambda → 对比哪些字段被设值了 → 只发送这些字段的 UpdateExpression。空 lambda 不会发送任何请求。
+部分更新原理：`update(entity, mutator)` 会创建一个仅包含主键值的干净实体副本，执行 mutator，然后对比差异检测哪些字段发生了变化。只有变更的字段会被发送为 `SET`（非 null）或 `REMOVE`（null）表达式。如果没有字段变化，则跳过更新。
 
----
+### 6. 删除
 
-## 注解一览
+```java
+// 按主键删除
+ddm.delete(Game.class, "zelda-001", "v1.0");
 
-EasyDynamodb 直接复用 AWS Enhanced Client 注解，无需学习新体系。仅 `@DynamoTable` 和 `@DynamoConverter` 是库独有的。
+// 批量删除
+ddm.deleteBatch(Game.class, List.of(
+    new KeyPair("zelda-001", "v1.0"),
+    new KeyPair("mario-001", "v2.0")
+));
 
-| 注解 | 位置 | 作用 |
-|------|------|------|
-| `@DynamoTable("表名")` | 类 | 指定 DynamoDB 表名。省略参数则用类名。**库独有** |
-| `@DynamoDbBean` | 类 | AWS 注解，也可作为实体标记（表名=类名） |
-| `@DynamoDbPartitionKey` | getter | 分区键（必须有且仅有一个） |
-| `@DynamoDbSortKey` | getter | 排序键（可选） |
-| `@DynamoDbAttribute("名称")` | getter | 自定义 DynamoDB 属性名 |
-| `@DynamoDbIgnore` | getter | 忽略该字段，不读写 DynamoDB |
-| `@DynamoDbSecondaryPartitionKey(indexNames={"idx"})` | getter | GSI 分区键 |
-| `@DynamoDbSecondarySortKey(indexNames={"idx"})` | getter | GSI 排序键 |
-| `@DynamoConverter(XxxConverter.class)` | 字段 | 指定自定义类型转换器。**库独有** |
+// 按条件删除 - 返回删除条数
+int deleted = ddm.deleteByCondition(Game.class,
+    "rating < :minRating",
+    Map.of(":minRating", AttributeValue.builder().n("5.0").build()),
+    null);
+System.out.println("已删除 " + deleted + " 条");
+```
+
+`deleteByCondition` 内部执行 scan -> 提取主键 -> 批量删除的循环。最后一个参数 `expressionNames` 不需要时可传 `null`。
 
 ---
 
 ## 类型映射
 
-内置 14 种 Java 类型的自动转换，无需手动处理。
-
 | Java 类型 | DynamoDB 类型 | 说明 |
 |-----------|--------------|------|
 | `String` | S | |
-| `Integer` `Long` `Float` `Double` `BigDecimal` | N | |
-| `Boolean` | BOOL | |
+| `Integer` `Long` `Float` `Double` `BigDecimal` | N | 包装类型和基本类型均支持 |
+| `Boolean` | BOOL | 包装类型和基本类型均支持 |
 | `byte[]` | B | 二进制 |
+| `Enum` | S | 自动按 `name()` 转换 |
 | `List<T>` | L | 递归转换元素 |
 | `Set<String>` | SS | 字符串集合 |
-| `Set<Integer>` `Set<Long>` 等 | NS | 数值集合 |
+| `Set<Integer>` `Set<Long>` `Set<Double>` ... | NS | 数值集合（按元素类型自动检测） |
 | `Map<String, T>` | M | 递归转换值 |
-| 嵌套实体 | M | 递归使用实体元数据转换 |
-| `Instant` | S | ISO-8601 |
-| `LocalDateTime` | S | ISO-8601 |
+| 嵌套实体（`@DynamoTable` / `@DynamoDbBean`） | M | 自动检测并递归转换 |
+| `Instant` | S | ISO-8601 格式 |
+| `LocalDateTime` | S | ISO-8601 格式 |
+
+---
+
+## 注解一览
+
+| 注解 | 标注位置 | 说明 |
+|------|----------|------|
+| `@DynamoTable("name")` | 类 | 表名（留空时默认使用类名）。库自有注解 |
+| `@DynamoDbPartitionKey` | Getter | 分区键（必须，每个实体有且仅有一个） |
+| `@DynamoDbSortKey` | Getter | 排序键（可选） |
+| `@DynamoDbAttribute("name")` | Getter | 自定义 DynamoDB 属性名（省略时使用 Java 字段名） |
+| `@DynamoDbIgnore` | Getter | 排除字段，不参与 DynamoDB 映射 |
+| `@DynamoDbSecondaryPartitionKey(indexNames={"idx"})` | Getter | GSI 分区键 |
+| `@DynamoDbSecondarySortKey(indexNames={"idx"})` | Getter | GSI 排序键 |
+| `@DynamoConverter(XxxConverter.class)` | 字段 | 指定自定义转换器。库自有注解 |
+
+说明：`@DynamoTable` 和 `@DynamoConverter` 是本库自有注解。所有 `@DynamoDb*` 注解来自 AWS SDK Enhanced Client。
 
 ---
 
 ## 自定义转换器
 
-当内置类型不满足需求时，实现 `AttributeConverter<T>` 接口：
+实现 `AttributeConverter<T>` 接口来处理自定义类型：
 
 ```java
-import com.jojo.framework.easydynamodb.converter.AttributeConverter;
-import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
-
 public class StatusConverter implements AttributeConverter<Status> {
-
     @Override
     public AttributeValue toAttributeValue(Status value) {
         return AttributeValue.builder().s(value.name()).build();
     }
-
     @Override
     public Status fromAttributeValue(AttributeValue av) {
         return Status.valueOf(av.s());
     }
-
     @Override
-    public Class<Status> targetType() {
-        return Status.class;
-    }
+    public Class<Status> targetType() { return Status.class; }
 }
 ```
 
 两种注册方式：
 
 ```java
-// 方式一：字段级 — 注解指定
+// 方式一：字段级别 - 仅对该字段生效
 @DynamoConverter(StatusConverter.class)
 private Status status;
 
-// 方式二：全局 — Builder 注册（对该类型的所有字段生效）
+// 方式二：全局注册 - 对所有该类型的字段生效
 DDM ddm = DDM.builder(client)
     .registerConverter(Status.class, new StatusConverter())
     .build();
 ```
 
----
-
-## 自动建表
-
-默认关闭，适用于开发/测试环境。首次 `save` 时若表不存在，自动根据实体注解创建。
-
-```java
-DDM ddm = DDM.builder(client)
-    .autoCreateTable(true)
-    .build();
-
-ddm.save(game);  // 表不存在 → 自动创建 → 保存
-```
-
-自动建表行为：
-- 计费模式：`PAY_PER_REQUEST`（按需）
-- 从 `@DynamoDbPartitionKey` / `@DynamoDbSortKey` 推断主键
-- 从 `@DynamoDbSecondaryPartitionKey` / `@DynamoDbSecondarySortKey` 推断 GSI（Projection = ALL）
-- 等待表状态 ACTIVE 后再执行保存
-
-> ⚠️ 生产环境建议关闭，通过 IaC 工具管理表结构。
+字段级别的 `@DynamoConverter` 优先级高于全局注册。
 
 ---
 
-## 表名前缀与自定义解析
+## 异常处理
 
-### 统一前缀
-
-```java
-DDM ddm = DDM.builder(client)
-    .tablePrefix("prod_")   // @DynamoTable("game") → 实际表名 "prod_game"
-    .build();
+```
+RuntimeException
+└── DynamoException                    // 所有 EasyDynamodb 错误的基类
+    ├── DynamoConfigException          // 注解/实体配置错误（注册阶段抛出）
+    ├── DynamoConversionException      // 类型转换失败（包含字段名、源类型、目标类型）
+    └── DynamoBatchException           // 批量操作部分失败（包含各项失败详情）
 ```
 
-### 自定义表名解析器
-
-继承 `TableNameResolver`，重写 `resolve` 方法：
+`DynamoBatchException` 提供对单项失败的访问：
 
 ```java
-import com.jojo.framework.easydynamodb.metadata.TableNameResolver;
-
-public class TenantResolver extends TableNameResolver {
-    private final String tenantId;
-
-    public TenantResolver(String tenantId) {
-        this.tenantId = tenantId;
-    }
-
-    @Override
-    public String resolve(String tableName, String prefix) {
-        // tableName = 注解原始表名, prefix = Builder 配置的前缀
-        return prefix + tenantId + "_" + tableName;
+try {
+    ddm.saveBatch(entities);
+} catch (DynamoBatchException e) {
+    for (DynamoBatchException.BatchFailure failure : e.getFailures()) {
+        System.err.println("失败键: " + failure.key() + ", 原因: " + failure.errorMessage());
     }
 }
 ```
 
+批量操作（save/get/delete）会自动重试未处理的项，最多 3 次，采用指数退避（100ms、200ms、400ms）。如果重试后仍有未处理的项，则抛出 `DynamoBatchException`。
+
+---
+
+## 日志
+
+EasyDynamodb 使用 SLF4J 输出内部日志，默认关闭。通过 Builder 开启：
+
 ```java
 DDM ddm = DDM.builder(client)
-    .tablePrefix("prod_")
-    .tableNameResolver(new TenantResolver("company_a"))
+    .enableLogging(true)
+    .logLevel(Level.DEBUG)    // TRACE / DEBUG / INFO / WARN / ERROR
     .build();
-// @DynamoTable("game") → "prod_company_a_game"
 ```
+
+| 级别 | 输出内容 |
+|------|----------|
+| `ERROR` | 操作失败、重试耗尽 |
+| `WARN` | 批量重试、部分失败 |
+| `INFO` | 实体注册、建表、操作完成 |
+| `DEBUG` | 操作参数、变更字段、查询条件 |
+| `TRACE` | DynamoDB 原始响应、单个 chunk 结果 |
+
+需要在运行时 classpath 中提供 SLF4J 实现（如 `slf4j-simple`、`logback-classic`、`log4j-slf4j2-impl`）。
 
 ---
 
-## 批量操作
+## 性能
 
-自动分批、并行执行、指数退避重试。
-
-```java
-// 批量保存（每批 25 条）
-ddm.saveBatch(gameList);
-
-// 批量获取（每批 100 条）
-List<Game> games = ddm.getBatch(Game.class, List.of(
-    new KeyPair("zelda-001", "v1.0"),
-    new KeyPair("mario-001", "v2.0")
-));
-```
-
-- 超过单批上限自动拆分
-- 多批并行发送
-- 未处理项自动重试（指数退避，最多 3 次）
-- 重试后仍有失败项 → 抛出 `DynamoBatchException`
-
----
-
-## 异常体系
-
-所有异常继承 `RuntimeException`，无需 try-catch。
-
-```
-RuntimeException
-└── DynamoException                    // 基类，包装 AWS SDK 异常
-    ├── DynamoConfigException          // 注解配置错误（缺少主键、无转换器等）
-    ├── DynamoConversionException      // 类型转换失败（含字段名、源类型、目标类型）
-    └── DynamoBatchException           // 批量操作部分失败（含失败项列表）
-```
-
----
-
-## 性能设计
-
-- 元数据一次解析，`ConcurrentHashMap` 缓存，运行时零反射
-- 字段读写使用 `MethodHandle`，JIT 后接近直接调用
-- 转换器在注册阶段绑定到字段，运行时无查找开销
-- 批量操作并行执行，充分利用 DynamoDB 分布式特性
-
----
-
-## 项目结构
-
-```
-com.jojo.framework.easydynamodb
-├── DDM.java                           // 核心入口（save/get/update/saveBatch/getBatch）
-├── annotation/
-│   ├── DynamoTable.java               // 表名注解
-│   └── DynamoConverter.java           // 自定义转换器注解
-├── metadata/
-│   ├── MetadataRegistry.java          // 元数据注册中心（解析注解、缓存）
-│   ├── EntityMetadata.java            // 实体元数据（表名、键、字段列表、GSI）
-│   ├── FieldMetadata.java             // 字段元数据（属性名、MethodHandle、转换器）
-│   ├── GsiMetadata.java               // GSI 元数据（索引名、分区键、排序键）
-│   └── TableNameResolver.java         // 表名解析器（可继承自定义）
-├── converter/
-│   ├── AttributeConverter.java        // 转换器接口
-│   ├── ConverterRegistry.java         // 转换器注册中心（内置 14 种类型）
-│   └── builtin/                       // 内置转换器
-│       ├── StringConverter
-│       ├── NumberConverter            // Integer/Long/Double/Float/BigDecimal
-│       ├── BooleanConverter
-│       ├── BinaryConverter            // byte[]
-│       ├── ListConverter              // List<T> → L
-│       ├── SetConverter               // Set<String> → SS, Set<Number> → NS
-│       ├── MapConverter               // Map<String,T> → M
-│       ├── NestedEntityConverter      // 嵌套实体 → M
-│       ├── InstantConverter           // Instant → S (ISO-8601)
-│       └── LocalDateTimeConverter     // LocalDateTime → S (ISO-8601)
-├── operation/
-│   ├── SaveOperation.java            // PutItem + 自动建表
-│   ├── GetOperation.java             // GetItem
-│   ├── UpdateOperation.java          // UpdateItem（mutator 模式 + 全量更新）
-│   ├── BatchOperation.java           // BatchWriteItem / BatchGetItem
-│   └── TableCreateOperation.java     // CreateTable（含 GSI）
-├── model/
-│   └── KeyPair.java                  // 批量获取用的主键对
-└── exception/
-    ├── DynamoException.java
-    ├── DynamoConfigException.java
-    ├── DynamoConversionException.java
-    └── DynamoBatchException.java
-```
+- 每个实体类的元数据只解析一次，缓存在 `ConcurrentHashMap` 中——运行时零反射开销
+- 字段访问通过 `MethodHandle`——JIT 预热后接近直接调用的性能
+- 转换器在注册时绑定——运行时零查找开销
+- 批量和更新操作通过虚拟线程（Java 21+）并行执行
+- 支持自定义 `batchExecutor`，适用于不希望使用虚拟线程的环境
 
 ## License
 

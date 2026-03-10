@@ -1,6 +1,7 @@
 package com.jojo.framework.easydynamodb.operation;
 
 import com.jojo.framework.easydynamodb.exception.DynamoException;
+import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import com.jojo.framework.easydynamodb.metadata.EntityMetadata;
 import com.jojo.framework.easydynamodb.metadata.FieldMetadata;
 import com.jojo.framework.easydynamodb.metadata.MetadataRegistry;
@@ -18,6 +19,8 @@ import java.util.Map;
  * DynamoDB item (AttributeValue Map) and issuing a PutItem request.
  */
 public class SaveOperation {
+
+    private static final DdmLogger log = DdmLogger.getLogger(SaveOperation.class);
 
     private final DynamoDbClient dynamoDbClient;
     private final MetadataRegistry metadataRegistry;
@@ -55,6 +58,7 @@ public class SaveOperation {
         EntityMetadata metadata = metadataRegistry.getMetadata(entityClass);
 
         Map<String, AttributeValue> item = toAttributeValueMap(entity, metadata);
+        log.debug("PutItem to table={}, attributes={}", metadata.getTableName(), item.size());
 
         PutItemRequest request = PutItemRequest.builder()
                 .tableName(metadata.getTableName())
@@ -63,22 +67,27 @@ public class SaveOperation {
 
         try {
             dynamoDbClient.putItem(request);
+            log.trace("PutItem succeeded for table={}", metadata.getTableName());
         } catch (ResourceNotFoundException e) {
             if (!autoCreateTable) {
+                log.error("Table {} does not exist and autoCreateTable is disabled", metadata.getTableName());
                 throw new DynamoException(
                         "Table " + metadata.getTableName() + " does not exist", e);
             }
-            // Auto-create the table and retry
+            log.info("Table {} not found, auto-creating...", metadata.getTableName());
             tableCreateOperation.createTable(metadata);
             try {
                 dynamoDbClient.putItem(request);
+                log.info("PutItem succeeded after auto-creating table={}", metadata.getTableName());
             } catch (DynamoDbException retryEx) {
+                log.error("PutItem failed after auto-creating table={}: {}", metadata.getTableName(), retryEx.getMessage());
                 throw new DynamoException(
                         "Failed to save entity of type " + entityClass.getName()
                                 + " to table " + metadata.getTableName()
                                 + " after auto-creating table: " + retryEx.getMessage(), retryEx);
             }
         } catch (DynamoDbException e) {
+            log.error("PutItem failed for table={}: {}", metadata.getTableName(), e.getMessage());
             throw new DynamoException(
                     "Failed to save entity of type " + entityClass.getName()
                             + " to table " + metadata.getTableName() + ": " + e.getMessage(), e);

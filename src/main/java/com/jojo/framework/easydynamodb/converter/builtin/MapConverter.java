@@ -42,10 +42,14 @@ public class MapConverter implements AttributeConverter<Map<String, ?>> {
 
     @Override
     public Map<String, ?> fromAttributeValue(AttributeValue attributeValue) {
+        if (!attributeValue.hasM()) {
+            throw new DynamoConversionException("map-field",
+                    AttributeValue.class, Map.class);
+        }
         Map<String, AttributeValue> m = attributeValue.m();
         Map<String, Object> result = new LinkedHashMap<>();
         for (Map.Entry<String, AttributeValue> entry : m.entrySet()) {
-            result.put(entry.getKey(), extractValue(entry.getValue()));
+            result.put(entry.getKey(), AttributeValueExtractor.extractValue(entry.getValue(), converterLookup));
         }
         return result;
     }
@@ -54,44 +58,5 @@ public class MapConverter implements AttributeConverter<Map<String, ?>> {
     @SuppressWarnings("unchecked")
     public Class<Map<String, ?>> targetType() {
         return (Class<Map<String, ?>>) (Class<?>) Map.class;
-    }
-
-    /**
-     * Extracts a Java value from an AttributeValue by inspecting its type.
-     */
-    private Object extractValue(AttributeValue av) {
-        if (Boolean.TRUE.equals(av.nul())) {
-            return null;
-        }
-        if (av.s() != null) {
-            return av.s();
-        }
-        if (av.n() != null) {
-            return new java.math.BigDecimal(av.n());
-        }
-        if (av.bool() != null) {
-            return av.bool();
-        }
-        if (av.b() != null) {
-            return av.b().asByteArray();
-        }
-        if (av.hasM()) {
-            return fromAttributeValue(av);
-        }
-        if (av.hasL()) {
-            ListConverter listConverter = new ListConverter(converterLookup);
-            return listConverter.fromAttributeValue(av);
-        }
-        if (av.hasSs()) {
-            return new java.util.LinkedHashSet<>(av.ss());
-        }
-        if (av.hasNs()) {
-            java.util.Set<java.math.BigDecimal> nums = new java.util.LinkedHashSet<>();
-            for (String n : av.ns()) {
-                nums.add(new java.math.BigDecimal(n));
-            }
-            return nums;
-        }
-        return null;
     }
 }

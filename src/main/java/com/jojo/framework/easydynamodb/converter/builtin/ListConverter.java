@@ -42,10 +42,14 @@ public class ListConverter implements AttributeConverter<List<?>> {
 
     @Override
     public List<?> fromAttributeValue(AttributeValue attributeValue) {
+        if (!attributeValue.hasL()) {
+            throw new DynamoConversionException("list-field",
+                    AttributeValue.class, List.class);
+        }
         List<AttributeValue> items = attributeValue.l();
         List<Object> result = new ArrayList<>(items.size());
         for (AttributeValue item : items) {
-            result.add(extractValue(item));
+            result.add(AttributeValueExtractor.extractValue(item, converterLookup));
         }
         return result;
     }
@@ -54,44 +58,5 @@ public class ListConverter implements AttributeConverter<List<?>> {
     @SuppressWarnings("unchecked")
     public Class<List<?>> targetType() {
         return (Class<List<?>>) (Class<?>) List.class;
-    }
-
-    /**
-     * Extracts a Java value from an AttributeValue by inspecting its type.
-     */
-    private Object extractValue(AttributeValue av) {
-        if (Boolean.TRUE.equals(av.nul())) {
-            return null;
-        }
-        if (av.s() != null) {
-            return av.s();
-        }
-        if (av.n() != null) {
-            return new java.math.BigDecimal(av.n());
-        }
-        if (av.bool() != null) {
-            return av.bool();
-        }
-        if (av.b() != null) {
-            return av.b().asByteArray();
-        }
-        if (av.hasL()) {
-            return fromAttributeValue(av);
-        }
-        if (av.hasM()) {
-            MapConverter mapConverter = new MapConverter(converterLookup);
-            return mapConverter.fromAttributeValue(av);
-        }
-        if (av.hasSs()) {
-            return new java.util.LinkedHashSet<>(av.ss());
-        }
-        if (av.hasNs()) {
-            java.util.Set<java.math.BigDecimal> nums = new java.util.LinkedHashSet<>();
-            for (String n : av.ns()) {
-                nums.add(new java.math.BigDecimal(n));
-            }
-            return nums;
-        }
-        return null;
     }
 }

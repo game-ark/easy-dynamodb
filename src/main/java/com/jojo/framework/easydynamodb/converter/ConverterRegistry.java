@@ -1,6 +1,7 @@
 package com.jojo.framework.easydynamodb.converter;
 
 import com.jojo.framework.easydynamodb.converter.builtin.*;
+import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 import java.math.BigDecimal;
@@ -19,6 +20,8 @@ import java.util.function.Function;
  */
 public class ConverterRegistry {
 
+    private static final DdmLogger log = DdmLogger.getLogger(ConverterRegistry.class);
+
     private final Map<Class<?>, AttributeConverter<?>> converters = new ConcurrentHashMap<>();
 
     /**
@@ -36,6 +39,7 @@ public class ConverterRegistry {
      */
     public void register(Class<?> type, AttributeConverter<?> converter) {
         converters.put(type, converter);
+        log.debug("Registered converter for type {}: {}", type.getSimpleName(), converter.getClass().getSimpleName());
     }
 
     /**
@@ -59,15 +63,29 @@ public class ConverterRegistry {
         // String
         converters.put(String.class, new StringConverter());
 
-        // Numeric types
-        converters.put(Integer.class, new NumberConverter(Integer.class));
-        converters.put(Long.class, new NumberConverter(Long.class));
-        converters.put(Double.class, new NumberConverter(Double.class));
-        converters.put(Float.class, new NumberConverter(Float.class));
+        // Numeric types — boxed and primitive
+        NumberConverter intConverter = new NumberConverter(Integer.class);
+        converters.put(Integer.class, intConverter);
+        converters.put(int.class, intConverter);
+
+        NumberConverter longConverter = new NumberConverter(Long.class);
+        converters.put(Long.class, longConverter);
+        converters.put(long.class, longConverter);
+
+        NumberConverter doubleConverter = new NumberConverter(Double.class);
+        converters.put(Double.class, doubleConverter);
+        converters.put(double.class, doubleConverter);
+
+        NumberConverter floatConverter = new NumberConverter(Float.class);
+        converters.put(Float.class, floatConverter);
+        converters.put(float.class, floatConverter);
+
         converters.put(BigDecimal.class, new NumberConverter(BigDecimal.class));
 
-        // Boolean
-        converters.put(Boolean.class, new BooleanConverter());
+        // Boolean — boxed and primitive
+        BooleanConverter boolConverter = new BooleanConverter();
+        converters.put(Boolean.class, boolConverter);
+        converters.put(boolean.class, boolConverter);
 
         // Binary
         converters.put(byte[].class, new BinaryConverter());

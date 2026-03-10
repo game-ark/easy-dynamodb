@@ -50,17 +50,25 @@ public class EntityMetadata {
         this.fieldByAttributeName = Collections.unmodifiableMap(fieldByAttributeName);
         this.globalSecondaryIndexes = Collections.unmodifiableList(globalSecondaryIndexes);
 
+        MethodHandle ctor;
         try {
-            MethodHandles.Lookup lookup = MethodHandles.lookup();
-            this.constructor = lookup.findConstructor(entityClass, MethodType.methodType(void.class));
+            MethodHandles.Lookup lookup = MethodHandles.privateLookupIn(entityClass, MethodHandles.lookup());
+            ctor = lookup.findConstructor(entityClass, MethodType.methodType(void.class));
+        } catch (IllegalAccessException e) {
+            // privateLookupIn failed (module restriction) — fallback to caller's lookup
+            try {
+                ctor = MethodHandles.lookup()
+                        .findConstructor(entityClass, MethodType.methodType(void.class));
+            } catch (NoSuchMethodException | IllegalAccessException ex) {
+                throw new DynamoConfigException(
+                        "Cannot access no-arg constructor of " + entityClass.getName()
+                                + ". Ensure the constructor is public.");
+            }
         } catch (NoSuchMethodException e) {
             throw new DynamoConfigException(
                     "Entity class " + entityClass.getName() + " must have a public no-arg constructor");
-        } catch (IllegalAccessException e) {
-            throw new DynamoConfigException(
-                    "Cannot access no-arg constructor of " + entityClass.getName()
-                            + ". Ensure the constructor is public.");
         }
+        this.constructor = ctor;
     }
 
     /**

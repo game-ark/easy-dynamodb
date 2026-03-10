@@ -13,7 +13,11 @@ DDM ddm = DDM.builder(client)
 ddm.save(user);                                    // Save
 User user = ddm.get(User.class, "user-001");       // Get
 ddm.update(user, u -> u.setName("New Name"));      // Partial update
-ddm.saveBatch(userList);                           // Batch save
+ddm.delete(User.class, "user-001");                // Delete
+List<User> users = ddm.query(User.class)           // Query
+    .keyCondition("pk = :pk")
+    .expressionValues(Map.of(":pk", AttributeValue.builder().s("user-001").build()))
+    .executeAll();
 ```
 
 ## Requirements
@@ -33,41 +37,49 @@ ddm.saveBatch(userList);                           // Batch save
 
 ---
 
-## Full Example
+## Core API Overview
 
-A game data table demonstrating all core features.
+| Category | Method | Description |
+|----------|--------|-------------|
+| Save | `save(entity)` | Save single entity |
+| Save | `saveBatch(list)` | Batch save (auto-split 25/batch, parallel) |
+| Get | `get(Class, pk)` / `get(Class, pk, sk)` | Get single entity by exact key |
+| Get | `getBatch(Class, keys)` | Batch get by exact keys (100/batch, parallel) |
+| Query | `query(Class)` | Fluent query builder (key conditions, GSI, filter, pagination) |
+| Query | `scan(Class)` | Fluent scan builder (filter, pagination) |
+| Update | `update(entity, mutator)` | Partial update (only changed fields) |
+| Update | `updateAll(entity)` | Full update (all non-key fields) |
+| Update | `updateBatch(list, mutator)` | Batch partial update (parallel) |
+| Update | `updateAllBatch(list)` | Batch full update (parallel) |
+| Delete | `delete(Class, pk)` / `delete(Class, pk, sk)` | Delete by exact key |
+| Delete | `deleteBatch(Class, keys)` | Batch delete by keys (25/batch, parallel) |
+| Delete | `deleteByCondition(Class, filter, values, names)` | Delete by condition, returns count |
+
+---
+
+## Full Example
 
 ### 1. Define Entity
 
 ```java
-import com.jojo.framework.easydynamodb.annotation.DynamoTable;
-import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.*;
-import java.util.List;
-
 @DynamoTable("game")
 public class Game {
-
     private String gameId;
     private String version;
     private String title;
     private String genre;
     private Double rating;
-    private Integer playerCount;
-    private List<String> tags;
-    private String internalNote;
+    private GameStatus status;       // Enum — auto-converted
+    private GameDetail detail;       // Nested entity — auto-converted
 
-    // ---- Primary Key ----
-
-    @DynamoDbPartitionKey                          // Partition key (required)
-    @DynamoDbAttribute("game_id")                  // Custom DynamoDB attribute name
+    @DynamoDbPartitionKey
+    @DynamoDbAttribute("game_id")
     public String getGameId() { return gameId; }
     public void setGameId(String gameId) { this.gameId = gameId; }
 
-    @DynamoDbSortKey                               // Sort key (optional)
+    @DynamoDbSortKey
     public String getVersion() { return version; }
     public void setVersion(String version) { this.version = version; }
-
-    // ---- GSI (Global Secondary Index) ----
 
     @DynamoDbSecondaryPartitionKey(indexNames = "genre-rating-index")
     public String getGenre() { return genre; }
@@ -77,337 +89,320 @@ public class Game {
     public Double getRating() { return rating; }
     public void setRating(Double rating) { this.rating = rating; }
 
-    // ---- Regular Fields ----
+    // ... other getters/setters
 
-    public String getTitle() { return title; }
-    public void setTitle(String title) { this.title = title; }
-
-    public Integer getPlayerCount() { return playerCount; }
-    public void setPlayerCount(Integer playerCount) { this.playerCount = playerCount; }
-
-    public List<String> getTags() { return tags; }
-    public void setTags(List<String> tags) { this.tags = tags; }
-
-    // ---- Ignored Field ----
-
-    @DynamoDbIgnore                                // Not written to DynamoDB
+    @DynamoDbIgnore
     public String getInternalNote() { return internalNote; }
-    public void setInternalNote(String internalNote) { this.internalNote = internalNote; }
 }
 ```
+
+Key points:
+- `@DynamoTable("game")` — maps to DynamoDB table named `game`. If omitted or empty, defaults to the class name.
+- `@DynamoDbPartitionKey` / `@DynamoDbSortKey` — placed on getters. Partition key is required, sort key is optional.
+- `@DynamoDbAttribute("game_id")` — custom DynamoDB attribute name. If omitted, uses the Java field name.
+- `@DynamoDbIgnore` — placed on getter, field will be excluded from DynamoDB mapping.
+- `@DynamoDbSecondaryPartitionKey` / `@DynamoDbSecondarySortKey` — GSI key definitions, placed on getters.
+
+Nested entities (`GameDetail` above) are auto-detected if annotated with `@DynamoTable` or `@DynamoDbBean`, and stored as DynamoDB Map (M) type.
 
 ### 2. Initialize DDM
 
 ```java
-import com.jojo.framework.easydynamodb.DDM;
-import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-
-DynamoDbClient client = DynamoDbClient.create();
-
-// Option 1: Quick create with defaults
-DDM ddm = DDM.create(client);
-
-// Option 2: Builder with custom configuration
 DDM ddm = DDM.builder(client)
-    .tablePrefix("prod_")              // Prefix all table names → "prod_game"
-    .autoCreateTable(true)             // Auto-create table on first save (default: off)
-    .register(Game.class)              // Pre-register entity (optional, auto-registered on first use)
+    .tablePrefix("prod_")           // Table name prefix (e.g. "prod_game")
+    .autoCreateTable(true)          // Auto-create table on first save if not exists
+    .register(Game.class)           // Pre-register entity (optional, auto-registered on first use)
+    .enableLogging(true)            // Enable internal logging (default: false)
+    .logLevel(Level.DEBUG)          // Set log level: TRACE/DEBUG/INFO/WARN/ERROR (default: INFO)
     .build();
 ```
 
-### 3. Save
+#### Builder Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `tablePrefix(String)` | `""` | Prefix prepended to all table names |
+| `autoCreateTable(boolean)` | `false` | Auto-create table (PAY_PER_REQUEST) on first save if table doesn't exist |
+| `register(Class<?>...)` | — | Pre-register entity classes at build time |
+| `registerConverter(Class, converter)` | — | Register a global custom converter for a type |
+| `tableNameResolver(TableNameResolver)` | `prefix + tableName` | Custom table name resolution strategy |
+| `batchExecutor(Executor)` | Virtual thread per task | Custom executor for batch parallel operations |
+| `enableLogging(boolean)` | `false` | Enable/disable internal logging (SLF4J) |
+| `logLevel(Level)` | `INFO` | Minimum log level (only effective when logging is enabled) |
+
+#### Custom Table Name Resolver
+
+Override `TableNameResolver` for advanced table naming strategies (e.g. multi-tenant):
 
 ```java
-Game game = new Game();
-game.setGameId("zelda-001");
-game.setVersion("v1.0");
-game.setTitle("The Legend of Zelda");
-game.setGenre("RPG");
-game.setRating(9.8);
-game.setPlayerCount(1);
-game.setTags(List.of("adventure", "openworld"));
-
-// Save single item (null fields are skipped, not written to DynamoDB)
-ddm.save(game);
-
-// Batch save (auto-splits into batches of 25, parallel execution)
-ddm.saveBatch(gameList);
-```
-
-### 4. Get
-
-```java
-// Partition key only
-Game game = ddm.get(Game.class, "zelda-001");
-
-// Partition key + sort key
-Game game = ddm.get(Game.class, "zelda-001", "v1.0");
-
-// Returns null if not found
-Game notFound = ddm.get(Game.class, "xxx", "v0");  // → null
-
-// Batch get (auto-splits into batches of 100, parallel execution)
-List<Game> games = ddm.getBatch(Game.class, List.of(
-    new KeyPair("zelda-001", "v1.0"),
-    new KeyPair("mario-001", "v2.0")
-));
-```
-
-### 5. Partial Update
-
-```java
-Game game = new Game();
-game.setGameId("zelda-001");
-game.setVersion("v1.0");
-
-// Only update specified fields, other fields remain unchanged
-ddm.update(game, g -> {
-    g.setTitle("The Legend of Zelda: Tears of the Kingdom");
-    g.setRating(9.9);
-});
-
-// Full update (all non-null, non-key fields)
-game.setTitle("The Legend of Zelda: Tears of the Kingdom");
-game.setRating(9.9);
-game.setPlayerCount(1);
-ddm.updateAll(game);
-```
-
-> How `update` works internally: creates an empty object with only the primary key set → passes it to your lambda → compares which fields were modified → sends only those fields as an UpdateExpression. An empty lambda sends no request.
-
----
-
-## Annotations
-
-EasyDynamodb reuses AWS Enhanced Client annotations directly. Only `@DynamoTable` and `@DynamoConverter` are library-specific.
-
-| Annotation | Target | Description |
-|-----------|--------|-------------|
-| `@DynamoTable("name")` | Class | Specifies DynamoDB table name. Defaults to class name if omitted. **Library-specific** |
-| `@DynamoDbBean` | Class | AWS annotation, also usable as entity marker (table name = class name) |
-| `@DynamoDbPartitionKey` | Getter | Partition key (exactly one required) |
-| `@DynamoDbSortKey` | Getter | Sort key (optional) |
-| `@DynamoDbAttribute("name")` | Getter | Custom DynamoDB attribute name |
-| `@DynamoDbIgnore` | Getter | Ignore field, not read/written to DynamoDB |
-| `@DynamoDbSecondaryPartitionKey(indexNames={"idx"})` | Getter | GSI partition key |
-| `@DynamoDbSecondarySortKey(indexNames={"idx"})` | Getter | GSI sort key |
-| `@DynamoConverter(XxxConverter.class)` | Field | Specify custom type converter. **Library-specific** |
-
----
-
-## Type Mapping
-
-14 built-in Java type converters, no manual handling required.
-
-| Java Type | DynamoDB Type | Notes |
-|-----------|--------------|-------|
-| `String` | S | |
-| `Integer` `Long` `Float` `Double` `BigDecimal` | N | |
-| `Boolean` | BOOL | |
-| `byte[]` | B | Binary |
-| `List<T>` | L | Recursively converts elements |
-| `Set<String>` | SS | String set |
-| `Set<Integer>` `Set<Long>` etc. | NS | Number set |
-| `Map<String, T>` | M | Recursively converts values |
-| Nested entity | M | Recursively converts using entity metadata |
-| `Instant` | S | ISO-8601 |
-| `LocalDateTime` | S | ISO-8601 |
-
----
-
-## Custom Converter
-
-When built-in types don't meet your needs, implement the `AttributeConverter<T>` interface:
-
-```java
-import com.jojo.framework.easydynamodb.converter.AttributeConverter;
-import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
-
-public class StatusConverter implements AttributeConverter<Status> {
-
-    @Override
-    public AttributeValue toAttributeValue(Status value) {
-        return AttributeValue.builder().s(value.name()).build();
-    }
-
-    @Override
-    public Status fromAttributeValue(AttributeValue av) {
-        return Status.valueOf(av.s());
-    }
-
-    @Override
-    public Class<Status> targetType() {
-        return Status.class;
-    }
-}
-```
-
-Two registration methods:
-
-```java
-// Method 1: Field-level — annotation
-@DynamoConverter(StatusConverter.class)
-private Status status;
-
-// Method 2: Global — Builder registration (applies to all fields of this type)
-DDM ddm = DDM.builder(client)
-    .registerConverter(Status.class, new StatusConverter())
-    .build();
-```
-
----
-
-## Auto-Create Table
-
-Disabled by default. Suitable for dev/test environments. Automatically creates the table based on entity annotations on first `save` if the table doesn't exist.
-
-```java
-DDM ddm = DDM.builder(client)
-    .autoCreateTable(true)
-    .build();
-
-ddm.save(game);  // Table doesn't exist → auto-create → save
-```
-
-Auto-create behavior:
-- Billing mode: `PAY_PER_REQUEST` (on-demand)
-- Infers primary key from `@DynamoDbPartitionKey` / `@DynamoDbSortKey`
-- Infers GSIs from `@DynamoDbSecondaryPartitionKey` / `@DynamoDbSecondarySortKey` (Projection = ALL)
-- Waits for table status ACTIVE before saving
-
-> ⚠️ Recommended to disable in production. Use IaC tools to manage table schemas.
-
----
-
-## Table Name Prefix & Custom Resolver
-
-### Unified Prefix
-
-```java
-DDM ddm = DDM.builder(client)
-    .tablePrefix("prod_")   // @DynamoTable("game") → actual table name "prod_game"
-    .build();
-```
-
-### Custom Table Name Resolver
-
-Extend `TableNameResolver` and override the `resolve` method:
-
-```java
-import com.jojo.framework.easydynamodb.metadata.TableNameResolver;
-
-public class TenantResolver extends TableNameResolver {
+public class TenantTableNameResolver extends TableNameResolver {
     private final String tenantId;
 
-    public TenantResolver(String tenantId) {
+    public TenantTableNameResolver(String tenantId) {
         this.tenantId = tenantId;
     }
 
     @Override
     public String resolve(String tableName, String prefix) {
-        // tableName = raw name from annotation, prefix = configured in Builder
         return prefix + tenantId + "_" + tableName;
     }
 }
-```
 
-```java
 DDM ddm = DDM.builder(client)
     .tablePrefix("prod_")
-    .tableNameResolver(new TenantResolver("company_a"))
+    .tableNameResolver(new TenantTableNameResolver("tenant-42"))
     .build();
-// @DynamoTable("game") → "prod_company_a_game"
+// Table name: "prod_tenant-42_game"
 ```
 
----
-
-## Batch Operations
-
-Auto-splitting, parallel execution, exponential backoff retry.
+### 3. Save
 
 ```java
-// Batch save (25 items per batch)
-ddm.saveBatch(gameList);
+ddm.save(game);              // Single save
+ddm.saveBatch(gameList);     // Batch save (25/batch, parallel)
+```
 
-// Batch get (100 items per batch)
+When `autoCreateTable(true)` is set, the first `save()` call will auto-create the table (with PAY_PER_REQUEST billing and all GSIs) if it doesn't exist, then retry the save.
+
+### 4. Get & Query
+
+```java
+// Exact key lookup (DynamoDB GetItem — O(1), cheapest)
+Game game = ddm.get(Game.class, "zelda-001", "v1.0");
+
+// Batch exact key lookup (DynamoDB BatchGetItem — 100/batch)
 List<Game> games = ddm.getBatch(Game.class, List.of(
     new KeyPair("zelda-001", "v1.0"),
     new KeyPair("mario-001", "v2.0")
 ));
 ```
 
-- Automatically splits when exceeding single batch limit
-- Multiple batches sent in parallel
-- Unprocessed items automatically retried (exponential backoff, max 3 retries)
-- Throws `DynamoBatchException` if items still fail after retries
+`KeyPair` accepts `(partitionKey, sortKey)` or just `(partitionKey)` for tables without a sort key.
+
+```java
+// Conditional query (DynamoDB Query — range conditions, GSI, pagination)
+List<Game> rpgGames = ddm.query(Game.class)
+    .index("genre-rating-index")
+    .keyCondition("genre = :genre AND rating > :min")
+    .expressionValues(Map.of(
+        ":genre", AttributeValue.builder().s("RPG").build(),
+        ":min", AttributeValue.builder().n("9.0").build()
+    ))
+    .descending()
+    .limit(10)
+    .executeAll();
+
+// Scan with filter (full table scan)
+List<Game> all = ddm.scan(Game.class)
+    .filter("rating > :min")
+    .expressionValues(Map.of(":min", AttributeValue.builder().n("9.0").build()))
+    .executeAll();
+```
+
+> `get` vs `query`: `get` is an O(1) exact key lookup (cheapest). `query` supports range conditions, GSI, sorting, and pagination — use it when you need to find multiple items by condition.
+
+#### Pagination
+
+Both `query()` and `scan()` support two execution modes:
+
+- `executeAll()` — auto-paginates and returns all matching items in a single `List<T>`.
+- `execute()` — returns a single page as `QueryResult<T>`, which contains `items()` and `lastEvaluatedKey()` for manual pagination.
+
+```java
+// Manual pagination
+QueryOperation.QueryResult<Game> page = ddm.query(Game.class)
+    .keyCondition("genre = :genre")
+    .expressionValues(Map.of(":genre", AttributeValue.builder().s("RPG").build()))
+    .limit(20)
+    .execute();
+
+List<Game> items = page.items();
+boolean hasMore = page.hasMorePages();
+
+// Fetch next page
+if (hasMore) {
+    QueryOperation.QueryResult<Game> nextPage = ddm.query(Game.class)
+        .keyCondition("genre = :genre")
+        .expressionValues(Map.of(":genre", AttributeValue.builder().s("RPG").build()))
+        .limit(20)
+        .startKey(page.lastEvaluatedKey())
+        .execute();
+}
+```
+
+### 5. Update
+
+```java
+// Partial update — only changed fields are sent
+ddm.update(game, g -> {
+    g.setTitle("Zelda: Tears of the Kingdom");
+    g.setRating(9.9);
+});
+
+// Full update — all non-null fields SET, null fields REMOVE
+ddm.updateAll(game);
+
+// Batch partial update — parallel execution
+ddm.updateBatch(gameList, g -> g.setStatus(GameStatus.ARCHIVED));
+
+// Batch full update — parallel execution
+ddm.updateAllBatch(gameList);
+```
+
+How partial update works: `update(entity, mutator)` creates a clean entity copy with only key values, applies the mutator, then diffs to detect which fields changed. Only changed fields are sent as `SET` (non-null) or `REMOVE` (null) expressions. If no fields changed, the update is skipped.
+
+### 6. Delete
+
+```java
+// Delete by exact key
+ddm.delete(Game.class, "zelda-001", "v1.0");
+
+// Batch delete by keys
+ddm.deleteBatch(Game.class, List.of(
+    new KeyPair("zelda-001", "v1.0"),
+    new KeyPair("mario-001", "v2.0")
+));
+
+// Delete by condition — returns number of items deleted
+int deleted = ddm.deleteByCondition(Game.class,
+    "rating < :minRating",
+    Map.of(":minRating", AttributeValue.builder().n("5.0").build()),
+    null);
+System.out.println("Deleted " + deleted + " items");
+```
+
+`deleteByCondition` internally performs a scan → extract keys → batch delete loop. The `expressionNames` parameter (last argument) can be `null` if not needed.
 
 ---
 
-## Exception Hierarchy
+## Type Mapping
 
-All exceptions extend `RuntimeException`, no try-catch required.
+| Java Type | DynamoDB Type | Notes |
+|-----------|--------------|-------|
+| `String` | S | |
+| `Integer` `Long` `Float` `Double` `BigDecimal` | N | Boxed and primitive types both supported |
+| `Boolean` | BOOL | Boxed and primitive both supported |
+| `byte[]` | B | Binary |
+| `Enum` | S | Auto-converted via `name()` |
+| `List<T>` | L | Recursive conversion of elements |
+| `Set<String>` | SS | String set |
+| `Set<Integer>` `Set<Long>` `Set<Double>` ... | NS | Number set (auto-detected by element type) |
+| `Map<String, T>` | M | Recursive conversion of values |
+| Nested entity (`@DynamoTable`/`@DynamoDbBean`) | M | Auto-detected and recursively converted |
+| `Instant` | S | ISO-8601 format |
+| `LocalDateTime` | S | ISO-8601 format |
+
+---
+
+## Annotations
+
+| Annotation | Target | Description |
+|-----------|--------|-------------|
+| `@DynamoTable("name")` | Class | Table name (defaults to class name if empty). Library-specific annotation |
+| `@DynamoDbPartitionKey` | Getter | Partition key (required, exactly one per entity) |
+| `@DynamoDbSortKey` | Getter | Sort key (optional) |
+| `@DynamoDbAttribute("name")` | Getter | Custom DynamoDB attribute name (defaults to Java field name) |
+| `@DynamoDbIgnore` | Getter | Exclude field from DynamoDB mapping |
+| `@DynamoDbSecondaryPartitionKey(indexNames={"idx"})` | Getter | GSI partition key |
+| `@DynamoDbSecondarySortKey(indexNames={"idx"})` | Getter | GSI sort key |
+| `@DynamoConverter(XxxConverter.class)` | Field | Custom converter for this field. Library-specific annotation |
+
+Note: `@DynamoTable` and `@DynamoConverter` are library-specific annotations. All `@DynamoDb*` annotations are from the AWS SDK Enhanced Client.
+
+---
+
+## Custom Converter
+
+Implement `AttributeConverter<T>` to handle custom types:
+
+```java
+public class StatusConverter implements AttributeConverter<Status> {
+    @Override
+    public AttributeValue toAttributeValue(Status value) {
+        return AttributeValue.builder().s(value.name()).build();
+    }
+    @Override
+    public Status fromAttributeValue(AttributeValue av) {
+        return Status.valueOf(av.s());
+    }
+    @Override
+    public Class<Status> targetType() { return Status.class; }
+}
+```
+
+Two ways to register:
+
+```java
+// Option 1: Field-level — applies to a single field
+@DynamoConverter(StatusConverter.class)
+private Status status;
+
+// Option 2: Global — applies to all fields of this type
+DDM ddm = DDM.builder(client)
+    .registerConverter(Status.class, new StatusConverter())
+    .build();
+```
+
+Field-level `@DynamoConverter` takes precedence over global registration.
+
+---
+
+## Exception Handling
 
 ```
 RuntimeException
-└── DynamoException                    // Base class, wraps AWS SDK exceptions
-    ├── DynamoConfigException          // Annotation config errors (missing PK, no converter, etc.)
-    ├── DynamoConversionException      // Type conversion failure (includes field name, source/target type)
-    └── DynamoBatchException           // Batch operation partial failure (includes failed items list)
+└── DynamoException                    // Base class for all EasyDynamodb errors
+    ├── DynamoConfigException          // Annotation/entity config errors (raised at registration time)
+    ├── DynamoConversionException      // Type conversion failures (includes field name, source/target types)
+    └── DynamoBatchException           // Batch partial failures (contains list of individual failures)
 ```
+
+`DynamoBatchException` provides access to individual failures:
+
+```java
+try {
+    ddm.saveBatch(entities);
+} catch (DynamoBatchException e) {
+    for (DynamoBatchException.BatchFailure failure : e.getFailures()) {
+        System.err.println("Failed key: " + failure.key() + ", reason: " + failure.errorMessage());
+    }
+}
+```
+
+Batch operations (save/get/delete) automatically retry unprocessed items up to 3 times with exponential backoff (100ms, 200ms, 400ms). If items remain unprocessed after retries, a `DynamoBatchException` is thrown.
 
 ---
 
-## Performance Design
+## Logging
 
-- Metadata parsed once, cached in `ConcurrentHashMap`, zero reflection at runtime
-- Field access via `MethodHandle`, near-direct invocation speed after JIT
-- Converters bound to fields at registration time, zero lookup overhead at runtime
-- Batch operations execute in parallel, fully leveraging DynamoDB's distributed nature
+EasyDynamodb uses SLF4J for internal logging, disabled by default. Enable it via the builder:
+
+```java
+DDM ddm = DDM.builder(client)
+    .enableLogging(true)
+    .logLevel(Level.DEBUG)    // TRACE / DEBUG / INFO / WARN / ERROR
+    .build();
+```
+
+| Level | What's logged |
+|-------|---------------|
+| `ERROR` | Operation failures, retries exhausted |
+| `WARN` | Batch retry attempts, partial failures |
+| `INFO` | Entity registration, table creation, operation completion |
+| `DEBUG` | Operation parameters, changed fields, query conditions |
+| `TRACE` | Raw DynamoDB responses, individual chunk results |
+
+You need to provide an SLF4J implementation (e.g. `slf4j-simple`, `logback-classic`, `log4j-slf4j2-impl`) in your runtime classpath.
 
 ---
 
-## Project Structure
+## Performance
 
-```
-com.jojo.framework.easydynamodb
-├── DDM.java                           // Core entry point (save/get/update/saveBatch/getBatch)
-├── annotation/
-│   ├── DynamoTable.java               // Table name annotation
-│   └── DynamoConverter.java           // Custom converter annotation
-├── metadata/
-│   ├── MetadataRegistry.java          // Metadata registry (parses annotations, caches)
-│   ├── EntityMetadata.java            // Entity metadata (table name, keys, fields, GSIs)
-│   ├── FieldMetadata.java             // Field metadata (attribute name, MethodHandle, converter)
-│   ├── GsiMetadata.java               // GSI metadata (index name, partition key, sort key)
-│   └── TableNameResolver.java         // Table name resolver (extendable)
-├── converter/
-│   ├── AttributeConverter.java        // Converter interface
-│   ├── ConverterRegistry.java         // Converter registry (14 built-in types)
-│   └── builtin/                       // Built-in converters
-│       ├── StringConverter
-│       ├── NumberConverter            // Integer/Long/Double/Float/BigDecimal
-│       ├── BooleanConverter
-│       ├── BinaryConverter            // byte[]
-│       ├── ListConverter              // List<T> → L
-│       ├── SetConverter               // Set<String> → SS, Set<Number> → NS
-│       ├── MapConverter               // Map<String,T> → M
-│       ├── NestedEntityConverter      // Nested entity → M
-│       ├── InstantConverter           // Instant → S (ISO-8601)
-│       └── LocalDateTimeConverter     // LocalDateTime → S (ISO-8601)
-├── operation/
-│   ├── SaveOperation.java            // PutItem + auto-create table
-│   ├── GetOperation.java             // GetItem
-│   ├── UpdateOperation.java          // UpdateItem (mutator pattern + full update)
-│   ├── BatchOperation.java           // BatchWriteItem / BatchGetItem
-│   └── TableCreateOperation.java     // CreateTable (with GSI)
-├── model/
-│   └── KeyPair.java                  // Key pair for batch get
-└── exception/
-    ├── DynamoException.java
-    ├── DynamoConfigException.java
-    ├── DynamoConversionException.java
-    └── DynamoBatchException.java
-```
+- Metadata parsed once per entity class, cached in `ConcurrentHashMap` — zero reflection at runtime
+- Field access via `MethodHandle` — near-direct invocation performance after JIT warm-up
+- Converters bound at registration time — zero lookup overhead at runtime
+- Batch and update operations parallelized via virtual threads (Java 21+)
+- Custom `batchExecutor` supported for environments where virtual threads are not desired
 
 ## License
 
