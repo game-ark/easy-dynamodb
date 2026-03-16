@@ -12,6 +12,7 @@ import software.amazon.awssdk.services.dynamodb.model.ScanRequest;
 import software.amazon.awssdk.services.dynamodb.model.ScanResponse;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -63,7 +64,7 @@ public class ScanOperation {
         }
 
         public ScanBuilder<T> expressionValues(Map<String, AttributeValue> values) {
-            this.expressionValues = values != null ? new java.util.HashMap<>(values) : null;
+            this.expressionValues = values != null ? new HashMap<>(values) : null;
             return this;
         }
 
@@ -79,7 +80,7 @@ public class ScanOperation {
          */
         public ScanBuilder<T> value(String placeholder, Object val) {
             if (this.expressionValues == null) {
-                this.expressionValues = new java.util.HashMap<>();
+                this.expressionValues = new HashMap<>();
             }
             this.expressionValues.put(placeholder, AttributeValues.of(val));
             return this;

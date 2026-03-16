@@ -14,6 +14,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
+import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -131,13 +135,13 @@ class UpdateOperationTest {
 
     @Test
     void updateBatch_emptyList_shouldNotCallDynamo() {
-        updateOperation.updateBatch(java.util.List.of(), e -> {});
+        updateOperation.updateBatch(List.of(), e -> {});
         verify(dynamoDbClient, never()).updateItem(any(UpdateItemRequest.class));
     }
 
     @Test
     void updateAllBatch_emptyList_shouldNotCallDynamo() {
-        updateOperation.updateAllBatch(java.util.List.of());
+        updateOperation.updateAllBatch(List.of());
         verify(dynamoDbClient, never()).updateItem(any(UpdateItemRequest.class));
     }
 
@@ -149,11 +153,11 @@ class UpdateOperationTest {
                 .thenReturn(UpdateItemResponse.builder().build());
 
         // Use a single-thread executor to verify it's actually used
-        java.util.concurrent.Executor customExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        Executor customExecutor = Executors.newSingleThreadExecutor();
         UpdateOperation customOp = new UpdateOperation(dynamoDbClient, metadataRegistry, customExecutor);
 
         SimpleItem item = new SimpleItem("id-1", "test", 10);
-        customOp.updateBatch(java.util.List.of(item), e -> e.setName("updated"));
+        customOp.updateBatch(List.of(item), e -> e.setName("updated"));
 
         verify(dynamoDbClient, atLeastOnce()).updateItem(any(UpdateItemRequest.class));
     }
@@ -166,7 +170,7 @@ class UpdateOperationTest {
         UpdateOperation nullExecOp = new UpdateOperation(dynamoDbClient, metadataRegistry, null);
 
         SimpleItem item = new SimpleItem("id-1", "test", 10);
-        nullExecOp.updateBatch(java.util.List.of(item), e -> e.setName("updated"));
+        nullExecOp.updateBatch(List.of(item), e -> e.setName("updated"));
 
         verify(dynamoDbClient, atLeastOnce()).updateItem(any(UpdateItemRequest.class));
     }
@@ -184,10 +188,10 @@ class UpdateOperationTest {
         SimpleItem item2 = new SimpleItem("id-2", "test2", 20);
 
         // Use single-thread executor to ensure deterministic ordering
-        java.util.concurrent.Executor singleThread = Runnable::run;
+        Executor singleThread = Runnable::run;
         UpdateOperation singleOp = new UpdateOperation(dynamoDbClient, metadataRegistry, singleThread);
 
-        assertThatThrownBy(() -> singleOp.updateBatch(java.util.List.of(item1, item2), e -> e.setName("new")))
+        assertThatThrownBy(() -> singleOp.updateBatch(List.of(item1, item2), e -> e.setName("new")))
                 .isInstanceOf(DynamoBatchException.class)
                 .isInstanceOf(DynamoException.class); // backward compatible
     }
@@ -200,10 +204,10 @@ class UpdateOperationTest {
         SimpleItem item1 = new SimpleItem("id-1", "test1", 10);
         SimpleItem item2 = new SimpleItem("id-2", "test2", 20);
 
-        java.util.concurrent.Executor singleThread = Runnable::run;
+        Executor singleThread = Runnable::run;
         UpdateOperation singleOp = new UpdateOperation(dynamoDbClient, metadataRegistry, singleThread);
 
-        assertThatThrownBy(() -> singleOp.updateBatch(java.util.List.of(item1, item2), e -> e.setName("new")))
+        assertThatThrownBy(() -> singleOp.updateBatch(List.of(item1, item2), e -> e.setName("new")))
                 .isInstanceOf(DynamoBatchException.class)
                 .satisfies(ex -> {
                     DynamoBatchException batchEx = (DynamoBatchException) ex;

@@ -16,6 +16,7 @@ import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbParti
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSecondaryPartitionKey;
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSecondarySortKey;
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSortKey;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -25,6 +26,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -357,8 +359,7 @@ public class MetadataRegistry {
         return new NestedEntityConverter<>(
                 entityClass,
                 entity -> {
-                    java.util.Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> map
-                            = new java.util.LinkedHashMap<>();
+                    Map<String, AttributeValue> map = new LinkedHashMap<>();
                     for (FieldMetadata fm : metadata.getFields()) {
                         Object value = fm.getValue(entity);
                         if (value != null) {
@@ -370,8 +371,7 @@ public class MetadataRegistry {
                 avMap -> {
                     T instance = (T) metadata.newInstance();
                     for (FieldMetadata fm : metadata.getFields()) {
-                        software.amazon.awssdk.services.dynamodb.model.AttributeValue av
-                                = avMap.get(fm.getDynamoAttributeName());
+                        AttributeValue av = avMap.get(fm.getDynamoAttributeName());
                         if (av != null) {
                             fm.setValue(instance, fm.fromAttributeValue(av));
                         }
@@ -411,7 +411,7 @@ public class MetadataRegistry {
     private boolean isNumericType(Class<?> type) {
         return type == Integer.class || type == Long.class
                 || type == Double.class || type == Float.class
-                || type == java.math.BigDecimal.class
+                || type == BigDecimal.class
                 || type == Short.class || type == Byte.class;
     }
 }

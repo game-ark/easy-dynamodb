@@ -9,7 +9,9 @@ import org.slf4j.event.Level;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -154,11 +156,11 @@ class DDMTest {
         Map<String, AttributeValue> item = Map.of(
                 "item_id", AttributeValue.builder().s("id-1").build()
         );
-        when(dynamoDbClient.scan(any(software.amazon.awssdk.services.dynamodb.model.ScanRequest.class)))
-                .thenReturn(software.amazon.awssdk.services.dynamodb.model.ScanResponse.builder()
-                        .items(java.util.List.of(item)).build());
-        when(dynamoDbClient.batchWriteItem(any(software.amazon.awssdk.services.dynamodb.model.BatchWriteItemRequest.class)))
-                .thenReturn(software.amazon.awssdk.services.dynamodb.model.BatchWriteItemResponse.builder().build());
+        when(dynamoDbClient.scan(any(ScanRequest.class)))
+                .thenReturn(ScanResponse.builder()
+                        .items(List.of(item)).build());
+        when(dynamoDbClient.batchWriteItem(any(BatchWriteItemRequest.class)))
+                .thenReturn(BatchWriteItemResponse.builder().build());
 
         DDM ddm = DDM.create(dynamoDbClient);
         int deleted = ddm.deleteByCondition(SimpleItem.class,
@@ -175,11 +177,11 @@ class DDMTest {
         Map<String, AttributeValue> item = Map.of(
                 "item_id", AttributeValue.builder().s("id-1").build()
         );
-        when(dynamoDbClient.scan(any(software.amazon.awssdk.services.dynamodb.model.ScanRequest.class)))
-                .thenReturn(software.amazon.awssdk.services.dynamodb.model.ScanResponse.builder()
-                        .items(java.util.List.of(item)).build());
-        when(dynamoDbClient.batchWriteItem(any(software.amazon.awssdk.services.dynamodb.model.BatchWriteItemRequest.class)))
-                .thenReturn(software.amazon.awssdk.services.dynamodb.model.BatchWriteItemResponse.builder().build());
+        when(dynamoDbClient.scan(any(ScanRequest.class)))
+                .thenReturn(ScanResponse.builder()
+                        .items(List.of(item)).build());
+        when(dynamoDbClient.batchWriteItem(any(BatchWriteItemRequest.class)))
+                .thenReturn(BatchWriteItemResponse.builder().build());
 
         DDM ddm = DDM.create(dynamoDbClient);
         int deleted = ddm.deleteByConditionWithValues(SimpleItem.class,
@@ -196,13 +198,13 @@ class DDMTest {
         when(dynamoDbClient.updateItem(any(UpdateItemRequest.class)))
                 .thenReturn(UpdateItemResponse.builder().build());
 
-        java.util.concurrent.Executor customExecutor = Runnable::run;
+        Executor customExecutor = Runnable::run;
         DDM ddm = DDM.builder(dynamoDbClient)
                 .batchExecutor(customExecutor)
                 .build();
 
         SimpleItem item = new SimpleItem("id-1", "test", 10);
-        ddm.updateBatch(java.util.List.of(item), e -> e.setName("updated"));
+        ddm.updateBatch(List.of(item), e -> e.setName("updated"));
 
         verify(dynamoDbClient, atLeastOnce()).updateItem(any(UpdateItemRequest.class));
     }

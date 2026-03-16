@@ -13,6 +13,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
+import java.util.List;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -62,13 +65,13 @@ class DeleteOperationTest {
     @Test
     void deleteByCondition_noItems_shouldReturnZero() {
         ScanResponse emptyResponse = ScanResponse.builder()
-                .items(java.util.List.of())
+                .items(List.of())
                 .build();
         when(dynamoDbClient.scan(any(ScanRequest.class))).thenReturn(emptyResponse);
 
         int deleted = deleteOperation.deleteByCondition(
                 SimpleItem.class, "count < :min",
-                java.util.Map.of(":min", AttributeValue.builder().n("5").build()),
+                Map.of(":min", AttributeValue.builder().n("5").build()),
                 null);
 
         assertThat(deleted).isZero();
@@ -79,23 +82,23 @@ class DeleteOperationTest {
     @Test
     void deleteByCondition_withUnprocessedItems_shouldRetry() {
         // Mock scan returning 2 items
-        java.util.Map<String, AttributeValue> item1 = java.util.Map.of(
+        Map<String, AttributeValue> item1 = Map.of(
                 "item_id", AttributeValue.builder().s("id-1").build());
-        java.util.Map<String, AttributeValue> item2 = java.util.Map.of(
+        Map<String, AttributeValue> item2 = Map.of(
                 "item_id", AttributeValue.builder().s("id-2").build());
         ScanResponse scanResponse = ScanResponse.builder()
-                .items(java.util.List.of(item1, item2))
+                .items(List.of(item1, item2))
                 .build();
         when(dynamoDbClient.scan(any(ScanRequest.class))).thenReturn(scanResponse);
 
         // First batchWrite has 1 unprocessed, second succeeds
         WriteRequest unprocessedWr = WriteRequest.builder()
                 .deleteRequest(DeleteRequest.builder()
-                        .key(java.util.Map.of("item_id", AttributeValue.builder().s("id-2").build()))
+                        .key(Map.of("item_id", AttributeValue.builder().s("id-2").build()))
                         .build())
                 .build();
         BatchWriteItemResponse firstResponse = BatchWriteItemResponse.builder()
-                .unprocessedItems(java.util.Map.of("simple_items", java.util.List.of(unprocessedWr)))
+                .unprocessedItems(Map.of("simple_items", List.of(unprocessedWr)))
                 .build();
         BatchWriteItemResponse secondResponse = BatchWriteItemResponse.builder().build();
 
@@ -105,7 +108,7 @@ class DeleteOperationTest {
 
         int deleted = deleteOperation.deleteByCondition(
                 SimpleItem.class, "count < :min",
-                java.util.Map.of(":min", AttributeValue.builder().n("5").build()),
+                Map.of(":min", AttributeValue.builder().n("5").build()),
                 null);
 
         assertThat(deleted).isEqualTo(2);
@@ -114,10 +117,10 @@ class DeleteOperationTest {
 
     @Test
     void deleteByCondition_allProcessed_shouldNotRetry() {
-        java.util.Map<String, AttributeValue> item1 = java.util.Map.of(
+        Map<String, AttributeValue> item1 = Map.of(
                 "item_id", AttributeValue.builder().s("id-1").build());
         ScanResponse scanResponse = ScanResponse.builder()
-                .items(java.util.List.of(item1))
+                .items(List.of(item1))
                 .build();
         when(dynamoDbClient.scan(any(ScanRequest.class))).thenReturn(scanResponse);
 
@@ -127,7 +130,7 @@ class DeleteOperationTest {
 
         int deleted = deleteOperation.deleteByCondition(
                 SimpleItem.class, "count < :min",
-                java.util.Map.of(":min", AttributeValue.builder().n("5").build()),
+                Map.of(":min", AttributeValue.builder().n("5").build()),
                 null);
 
         assertThat(deleted).isEqualTo(1);

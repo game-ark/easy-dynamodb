@@ -4,6 +4,7 @@ import com.jojo.framework.easydynamodb.converter.ConverterRegistry;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -46,7 +47,7 @@ class ListConverterTest {
 
     @Test
     void listWithNull_shouldHandleNullElements() {
-        List<String> original = new java.util.ArrayList<>();
+        List<String> original = new ArrayList<>();
         original.add("a");
         original.add(null);
         original.add("c");

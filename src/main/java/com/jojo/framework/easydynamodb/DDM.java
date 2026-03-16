@@ -11,6 +11,7 @@ import org.slf4j.event.Level;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -234,7 +235,7 @@ public class DDM {
                                                String filterExpression,
                                                Map<String, Object> values,
                                                Map<String, String> expressionNames) {
-        Map<String, AttributeValue> converted = new java.util.HashMap<>();
+        Map<String, AttributeValue> converted = new HashMap<>();
         if (values != null) {
             values.forEach((k, v) -> converted.put(k, AttributeValues.of(v)));
         }

@@ -14,6 +14,7 @@ import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -83,7 +84,7 @@ public class UpdateOperation {
             if (field.isPartitionKey() || field.isSortKey()) continue;
             Object before = beforeValues.get(field.getJavaFieldName());
             Object after = field.getValue(cleanEntity);
-            if (!java.util.Objects.equals(before, after)) {
+            if (!Objects.equals(before, after)) {
                 changedFields.add(field.getJavaFieldName());
             }
         }
@@ -173,7 +174,7 @@ public class UpdateOperation {
 
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        } catch (java.util.concurrent.CompletionException e) {
+        } catch (CompletionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof DynamoException de) throw de;
             throw new DynamoException("Batch " + opName + " update failed: " + cause.getMessage(), cause);

@@ -12,6 +12,7 @@ import software.amazon.awssdk.services.dynamodb.model.*;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -94,7 +95,7 @@ public class BatchOperation {
         // Wait for all chunks to complete
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        } catch (java.util.concurrent.CompletionException e) {
+        } catch (CompletionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof DynamoException de) {
                 throw de;
@@ -140,7 +141,7 @@ public class BatchOperation {
 
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        } catch (java.util.concurrent.CompletionException e) {
+        } catch (CompletionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof DynamoException de) {
                 throw de;
@@ -183,7 +184,7 @@ public class BatchOperation {
 
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        } catch (java.util.concurrent.CompletionException e) {
+        } catch (CompletionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof DynamoException de) {
                 throw de;

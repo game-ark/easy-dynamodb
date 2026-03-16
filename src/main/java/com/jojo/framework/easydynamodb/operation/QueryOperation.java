@@ -4,6 +4,7 @@ import com.jojo.framework.easydynamodb.exception.DynamoException;
 import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import com.jojo.framework.easydynamodb.metadata.EntityMetadata;
 import com.jojo.framework.easydynamodb.metadata.MetadataRegistry;
+import com.jojo.framework.easydynamodb.model.PagedResult;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
@@ -11,6 +12,7 @@ import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
 import software.amazon.awssdk.services.dynamodb.model.QueryResponse;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -86,7 +88,7 @@ public class QueryOperation {
 
         /** Set expression attribute values (e.g. ":pk" → AttributeValue). */
         public QueryBuilder<T> expressionValues(Map<String, AttributeValue> values) {
-            this.expressionValues = values != null ? new java.util.HashMap<>(values) : null;
+            this.expressionValues = values != null ? new HashMap<>(values) : null;
             return this;
         }
 
@@ -102,7 +104,7 @@ public class QueryOperation {
          */
         public QueryBuilder<T> value(String placeholder, Object val) {
             if (this.expressionValues == null) {
-                this.expressionValues = new java.util.HashMap<>();
+                this.expressionValues = new HashMap<>();
             }
             this.expressionValues.put(placeholder, AttributeValues.of(val));
             return this;
@@ -263,9 +265,9 @@ public class QueryOperation {
             return lastEvaluatedKey != null && !lastEvaluatedKey.isEmpty();
         }
 
-        /** Converts to the new PagedResult type. */
-        public com.jojo.framework.easydynamodb.model.PagedResult<T> toPagedResult() {
-            return new com.jojo.framework.easydynamodb.model.PagedResult<>(items, lastEvaluatedKey);
+        /** Converts to PagedResult type. */
+        public PagedResult<T> toPagedResult() {
+            return new PagedResult<>(items, lastEvaluatedKey);
         }
     }
 }
