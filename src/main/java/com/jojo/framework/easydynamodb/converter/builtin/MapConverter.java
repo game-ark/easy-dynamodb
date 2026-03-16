@@ -10,15 +10,31 @@ import java.util.function.Function;
 
 /**
  * Converts Map&lt;String, ?&gt; ↔ DynamoDB M (Map) type with recursive value conversion.
+ * 递归转换 Map&lt;String, ?&gt; ↔ DynamoDB M（映射）类型。
  */
 public class MapConverter implements AttributeConverter<Map<String, ?>> {
 
     private final Function<Class<?>, AttributeConverter<?>> converterLookup;
 
+    /**
+     * Creates a MapConverter with the given converter lookup function.
+     * 使用给定的转换器查找函数创建 MapConverter。
+     *
+     * @param converterLookup function to resolve converters for value types / 用于解析值类型转换器的函数
+     */
     public MapConverter(Function<Class<?>, AttributeConverter<?>> converterLookup) {
         this.converterLookup = converterLookup;
     }
 
+    /**
+     * Converts a Map&lt;String, ?&gt; to a DynamoDB M (Map) AttributeValue, recursively converting each value.
+     * Null values are stored as DynamoDB NULL.
+     * 将 Map&lt;String, ?&gt; 转换为 DynamoDB M（映射）AttributeValue，递归转换每个值。
+     * null 值存储为 DynamoDB NULL。
+     *
+     * @param value the Map to convert / 要转换的 Map
+     * @return the DynamoDB M AttributeValue / DynamoDB M 类型的 AttributeValue
+     */
     @Override
     @SuppressWarnings("unchecked")
     public AttributeValue toAttributeValue(Map<String, ?> value) {
@@ -40,6 +56,13 @@ public class MapConverter implements AttributeConverter<Map<String, ?>> {
         return AttributeValue.builder().m(map).build();
     }
 
+    /**
+     * Converts a DynamoDB M (Map) AttributeValue back to a Map&lt;String, ?&gt;, recursively extracting each value.
+     * 将 DynamoDB M（映射）AttributeValue 转换回 Map&lt;String, ?&gt;，递归提取每个值。
+     *
+     * @param attributeValue the DynamoDB AttributeValue to convert / 要转换的 DynamoDB AttributeValue
+     * @return the extracted Map / 提取的 Map
+     */
     @Override
     public Map<String, ?> fromAttributeValue(AttributeValue attributeValue) {
         if (!attributeValue.hasM()) {
@@ -54,6 +77,12 @@ public class MapConverter implements AttributeConverter<Map<String, ?>> {
         return result;
     }
 
+    /**
+     * Returns the target type this converter handles: {@code Map.class}.
+     * 返回此转换器处理的目标类型：{@code Map.class}。
+     *
+     * @return {@code Map.class} / {@code Map.class}
+     */
     @Override
     @SuppressWarnings("unchecked")
     public Class<Map<String, ?>> targetType() {

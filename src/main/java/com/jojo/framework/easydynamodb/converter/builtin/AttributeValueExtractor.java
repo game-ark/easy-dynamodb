@@ -12,18 +12,26 @@ import com.jojo.framework.easydynamodb.converter.AttributeConverter;
 /**
  * Shared utility for extracting Java values from DynamoDB AttributeValue.
  * Eliminates duplicate extractValue() logic in ListConverter and MapConverter.
+ * 从 DynamoDB AttributeValue 中提取 Java 值的共享工具类。
+ * 消除 ListConverter 和 MapConverter 中重复的 extractValue() 逻辑。
  */
 public final class AttributeValueExtractor {
 
+    /**
+     * Private constructor to prevent instantiation of this utility class.
+     * 私有构造函数，防止实例化此工具类。
+     */
     private AttributeValueExtractor() {}
 
     /**
      * Extracts a Java value from an AttributeValue by inspecting its type
      * using {@code av.type()} to avoid AWS SDK v2's non-null default returns.
+     * 通过使用 {@code av.type()} 检查类型，从 AttributeValue 中提取 Java 值，
+     * 以避免 AWS SDK v2 的非空默认返回值。
      *
-     * @param av              the AttributeValue to extract
-     * @param converterLookup function to look up converters for nested types
-     * @return the extracted Java value, or null
+     * @param av              the AttributeValue to extract / 要提取的 AttributeValue
+     * @param converterLookup function to look up converters for nested types / 用于查找嵌套类型转换器的函数
+     * @return the extracted Java value, or null / 提取的 Java 值，或 null
      */
     public static Object extractValue(AttributeValue av,
                                        Function<Class<?>, AttributeConverter<?>> converterLookup) {

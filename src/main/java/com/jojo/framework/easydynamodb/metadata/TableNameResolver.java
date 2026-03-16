@@ -1,12 +1,18 @@
 package com.jojo.framework.easydynamodb.metadata;
 
 /**
+ * Table name resolver that generates the final DynamoDB table name based on
+ * the annotated table name and the configured prefix.
  * 表名解析器，负责根据注解表名和配置的前缀生成最终的 DynamoDB 表名。
  * <p>
+ * The default implementation returns prefix + tableName. You can subclass and
+ * override {@link #resolve(String, String)} to implement custom table name
+ * generation logic (e.g., multi-tenancy, environment differentiation).
  * 默认实现为 prefix + tableName。可通过继承并重写 {@link #resolve(String, String)}
  * 方法实现自定义的表名生成逻辑（如多租户、环境区分等）。
  *
  * <pre>{@code
+ * // Custom example: multi-tenant table name
  * // 自定义示例：多租户表名
  * public class TenantTableNameResolver extends TableNameResolver {
  *     private final String tenantId;
@@ -25,11 +31,13 @@ package com.jojo.framework.easydynamodb.metadata;
 public class TableNameResolver {
 
     /**
+     * Resolves the final DynamoDB table name from the annotated table name and
+     * the configured prefix.
      * 根据注解表名和配置的前缀，返回最终使用的 DynamoDB 表名。
      *
-     * @param tableName 从注解解析出的原始表名（@DynamoTable 的 value 或类名）
-     * @param prefix    通过 Builder 配置的表名前缀，未配置时为空字符串
-     * @return 最终使用的 DynamoDB 表名
+     * @param tableName the raw table name parsed from annotation ({@code @DynamoTable} value or class name) / 从注解解析出的原始表名（@DynamoTable 的 value 或类名）
+     * @param prefix    the table name prefix configured via Builder, empty string if not configured / 通过 Builder 配置的表名前缀，未配置时为空字符串
+     * @return the final DynamoDB table name / 最终使用的 DynamoDB 表名
      */
     public String resolve(String tableName, String prefix) {
         if (prefix == null || prefix.isEmpty()) {

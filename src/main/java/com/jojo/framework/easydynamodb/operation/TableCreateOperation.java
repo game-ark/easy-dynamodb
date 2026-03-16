@@ -19,6 +19,8 @@ import java.util.Set;
  * Creates a DynamoDB table based on entity metadata. Infers key schema and
  * attribute types from the entity's partition key and optional sort key,
  * uses PAY_PER_REQUEST billing, and waits for the table to become ACTIVE.
+ * 基于实体元数据创建 DynamoDB 表。从实体的分区键和可选排序键推断键模式和属性类型，
+ * 使用 PAY_PER_REQUEST 计费模式，并等待表变为 ACTIVE 状态。
  */
 public class TableCreateOperation {
 
@@ -26,15 +28,22 @@ public class TableCreateOperation {
 
     private final DynamoDbClient dynamoDbClient;
 
+    /**
+     * Constructs a TableCreateOperation.
+     * 构造 TableCreateOperation。
+     *
+     * @param dynamoDbClient the DynamoDB client / DynamoDB 客户端
+     */
     public TableCreateOperation(DynamoDbClient dynamoDbClient) {
         this.dynamoDbClient = dynamoDbClient;
     }
 
     /**
      * Creates a DynamoDB table derived from the given entity metadata.
+     * 根据给定的实体元数据创建 DynamoDB 表。
      *
-     * @param metadata the entity metadata describing table name and keys
-     * @throws DynamoException if table creation or waiting fails
+     * @param metadata the entity metadata describing table name and keys / 描述表名和键的实体元数据
+     * @throws DynamoException if table creation or waiting fails / 建表或等待失败时抛出
      */
     public void createTable(EntityMetadata metadata) {
         String tableName = metadata.getTableName();
@@ -148,15 +157,16 @@ public class TableCreateOperation {
 
     /**
      * Maps a Java field type to the corresponding DynamoDB scalar attribute type.
+     * 将 Java 字段类型映射为对应的 DynamoDB 标量属性类型。
      * <ul>
      *   <li>String → S</li>
-     *   <li>Number types (Integer, Long, Short, Byte, Float, Double, BigDecimal) → N</li>
+     *   <li>Number types (Integer, Long, Short, Byte, Float, Double, BigDecimal) → N / 数字类型 → N</li>
      *   <li>byte[] → B</li>
      * </ul>
      *
-     * @param fieldType the Java class of the key field
-     * @return the DynamoDB ScalarAttributeType
-     * @throws DynamoException if the type is not supported as a key type
+     * @param fieldType the Java class of the key field / 键字段的 Java 类
+     * @return the DynamoDB ScalarAttributeType / DynamoDB 标量属性类型
+     * @throws DynamoException if the type is not supported as a key type / 类型不支持作为键类型时抛出
      */
     static ScalarAttributeType toDynamoScalarType(Class<?> fieldType) {
         if (fieldType == String.class) {

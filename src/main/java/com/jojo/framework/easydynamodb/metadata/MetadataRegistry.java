@@ -34,11 +34,17 @@ import java.util.concurrent.ConcurrentHashMap;
  * Registry that parses entity class annotations and caches {@link EntityMetadata}
  * for each registered class. All reflection and MethodHandle resolution happens
  * once at registration time so that runtime operations incur zero overhead.
+ * 解析实体类注解并为每个注册类缓存 {@link EntityMetadata} 的注册表。所有反射和
+ * MethodHandle 解析在注册时一次性完成，运行时操作零开销。
  * <p>
  * Uses AWS Enhanced Client annotations ({@code @DynamoDbPartitionKey},
  * {@code @DynamoDbSortKey}, {@code @DynamoDbAttribute}, {@code @DynamoDbIgnore})
  * on getter methods for field-level mapping, and either {@code @DynamoTable} or
  * {@code @DynamoDbBean} as class-level entity markers.
+ * 使用 AWS Enhanced Client 注解（{@code @DynamoDbPartitionKey}、
+ * {@code @DynamoDbSortKey}、{@code @DynamoDbAttribute}、{@code @DynamoDbIgnore}）
+ * 在 getter 方法上进行字段级映射，并使用 {@code @DynamoTable} 或
+ * {@code @DynamoDbBean} 作为类级实体标记。
  */
 public class MetadataRegistry {
 
@@ -49,16 +55,41 @@ public class MetadataRegistry {
     private final String tablePrefix;
     private final TableNameResolver tableNameResolver;
 
+    /**
+     * Constructs a MetadataRegistry with the given converter registry and table prefix,
+     * using the default TableNameResolver.
+     * 使用给定的转换器注册表和表名前缀构造 MetadataRegistry，使用默认的 TableNameResolver。
+     *
+     * @param converterRegistry the converter registry for type conversions / 用于类型转换的转换器注册表
+     * @param tablePrefix       the prefix to prepend to table names, may be null / 表名前缀，可为 null
+     */
     public MetadataRegistry(ConverterRegistry converterRegistry, String tablePrefix) {
         this(converterRegistry, tablePrefix, new TableNameResolver());
     }
 
+    /**
+     * Constructs a MetadataRegistry with the given converter registry, table prefix,
+     * and custom table name resolver.
+     * 使用给定的转换器注册表、表名前缀和自定义表名解析器构造 MetadataRegistry。
+     *
+     * @param converterRegistry  the converter registry for type conversions / 用于类型转换的转换器注册表
+     * @param tablePrefix        the prefix to prepend to table names, may be null / 表名前缀，可为 null
+     * @param tableNameResolver  the custom table name resolver, defaults to standard resolver if null / 自定义表名解析器，为 null 时使用默认解析器
+     */
     public MetadataRegistry(ConverterRegistry converterRegistry, String tablePrefix, TableNameResolver tableNameResolver) {
         this.converterRegistry = converterRegistry;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableNameResolver = tableNameResolver != null ? tableNameResolver : new TableNameResolver();
     }
 
+    /**
+     * Registers an entity class by parsing its annotations and caching the metadata.
+     * If the class is already registered, this method is a no-op.
+     * 通过解析注解并缓存元数据来注册实体类。如果该类已注册，则此方法不执行任何操作。
+     *
+     * @param entityClass the entity class to register / 要注册的实体类
+     * @throws DynamoConfigException if the entity class is misconfigured / 实体类配置错误时抛出
+     */
     public void register(Class<?> entityClass) {
         cache.computeIfAbsent(entityClass, clazz -> {
             log.debug("Parsing entity class: {}", clazz.getName());
@@ -68,6 +99,14 @@ public class MetadataRegistry {
         });
     }
 
+    /**
+     * Returns the cached EntityMetadata for the given entity class.
+     * 返回给定实体类的缓存 EntityMetadata。
+     *
+     * @param entityClass the entity class to look up / 要查找的实体类
+     * @return the cached entity metadata / 缓存的实体元数据
+     * @throws DynamoConfigException if the entity class is not registered / 实体类未注册时抛出
+     */
     public EntityMetadata getMetadata(Class<?> entityClass) {
         EntityMetadata metadata = cache.get(entityClass);
         if (metadata == null) {
@@ -78,6 +117,13 @@ public class MetadataRegistry {
         return metadata;
     }
 
+    /**
+     * Checks whether the given entity class has been registered.
+     * 检查给定的实体类是否已注册。
+     *
+     * @param entityClass the entity class to check / 要检查的实体类
+     * @return true if the entity class is registered / 如果实体类已注册则返回 true
+     */
     public boolean isRegistered(Class<?> entityClass) {
         return cache.containsKey(entityClass);
     }

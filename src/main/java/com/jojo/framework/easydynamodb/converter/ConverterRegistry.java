@@ -17,6 +17,8 @@ import java.util.function.Function;
  * Registry for type-to-converter mappings. Initializes with all built-in converters
  * and supports custom converter registration. Caches converters per Java type to
  * avoid runtime lookup overhead.
+ * 类型到转换器映射的注册中心。初始化时注册所有内置转换器，并支持自定义转换器注册。
+ * 按 Java 类型缓存转换器，以避免运行时查找开销。
  */
 public class ConverterRegistry {
 
@@ -26,6 +28,7 @@ public class ConverterRegistry {
 
     /**
      * Creates a new ConverterRegistry with all built-in converters registered.
+     * 创建一个新的 ConverterRegistry，并注册所有内置转换器。
      */
     public ConverterRegistry() {
         registerBuiltinConverters();
@@ -33,9 +36,10 @@ public class ConverterRegistry {
 
     /**
      * Registers a custom converter for the given type, overriding any existing mapping.
+     * 为指定类型注册自定义转换器，覆盖任何已有的映射。
      *
-     * @param type      the Java class to associate with the converter
-     * @param converter the converter instance
+     * @param type      the Java class to associate with the converter / 要与转换器关联的 Java 类
+     * @param converter the converter instance / 转换器实例
      */
     public void register(Class<?> type, AttributeConverter<?> converter) {
         converters.put(type, converter);
@@ -44,9 +48,10 @@ public class ConverterRegistry {
 
     /**
      * Returns the converter for the given type, or null if none is registered.
+     * 返回指定类型的转换器，如果未注册则返回 null。
      *
-     * @param type the Java class to look up
-     * @return the associated converter, or null
+     * @param type the Java class to look up / 要查找的 Java 类
+     * @return the associated converter, or null / 关联的转换器，如果没有则为 null
      */
     public AttributeConverter<?> getConverter(Class<?> type) {
         return converters.get(type);
@@ -54,6 +59,9 @@ public class ConverterRegistry {
 
     /**
      * Returns a lookup function suitable for passing to ListConverter and MapConverter.
+     * 返回一个查找函数，适合传递给 ListConverter 和 MapConverter。
+     *
+     * @return a function that maps a Java class to its converter / 将 Java 类映射到其转换器的函数
      */
     public Function<Class<?>, AttributeConverter<?>> lookupFunction() {
         return this::getConverter;

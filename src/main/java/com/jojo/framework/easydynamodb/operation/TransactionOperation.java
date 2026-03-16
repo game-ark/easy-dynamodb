@@ -16,16 +16,19 @@ import java.util.function.Consumer;
 
 /**
  * Handles DynamoDB TransactWriteItems and TransactGetItems operations.
+ * 处理 DynamoDB TransactWriteItems 和 TransactGetItems 操作。
  * <p>
  * Supports up to 100 items per transaction (DynamoDB limit), with automatic
  * splitting into multiple transactions if needed (opt-in).
+ * 每个事务最多支持 100 个项（DynamoDB 限制），如需可自动拆分为多个事务（可选）。
  * <p>
  * A transaction guarantees all-or-nothing atomicity: either all items succeed
  * or none are applied. This is essential for operations like:
+ * 事务保证全有或全无的原子性：要么所有项成功，要么全部不生效。适用于以下操作：
  * <ul>
- *   <li>Transferring currency between two players</li>
- *   <li>Deducting items while granting rewards</li>
- *   <li>Creating related records across multiple tables atomically</li>
+ *   <li>Transferring currency between two players / 在两个玩家之间转移货币</li>
+ *   <li>Deducting items while granting rewards / 扣除物品同时发放奖励</li>
+ *   <li>Creating related records across multiple tables atomically / 跨多个表原子性地创建关联记录</li>
  * </ul>
  *
  * <pre>{@code
@@ -54,6 +57,14 @@ public class TransactionOperation {
     private final MetadataRegistry metadataRegistry;
     private final SaveOperation saveOperation;
 
+    /**
+     * Constructs a TransactionOperation.
+     * 构造 TransactionOperation。
+     *
+     * @param dynamoDbClient   the DynamoDB client / DynamoDB 客户端
+     * @param metadataRegistry the metadata registry / 元数据注册中心
+     * @param saveOperation    the save operation for entity conversion / 用于实体转换的保存操作
+     */
     public TransactionOperation(DynamoDbClient dynamoDbClient,
                                 MetadataRegistry metadataRegistry,
                                 SaveOperation saveOperation) {
@@ -64,8 +75,9 @@ public class TransactionOperation {
 
     /**
      * Creates a new transaction write builder.
+     * 创建新的事务写入构建器。
      *
-     * @return a new TransactWriteBuilder
+     * @return a new TransactWriteBuilder / 新的 TransactWriteBuilder
      */
     public TransactWriteBuilder transact() {
         return new TransactWriteBuilder();
@@ -73,8 +85,9 @@ public class TransactionOperation {
 
     /**
      * Creates a new transaction read builder.
+     * 创建新的事务读取构建器。
      *
-     * @return a new TransactGetBuilder
+     * @return a new TransactGetBuilder / 新的 TransactGetBuilder
      */
     public TransactGetBuilder transactGet() {
         return new TransactGetBuilder();
@@ -86,13 +99,15 @@ public class TransactionOperation {
 
     /**
      * Fluent builder for constructing DynamoDB TransactWriteItems requests.
+     * 用于构建 DynamoDB TransactWriteItems 请求的流式构建器。
      * <p>
      * Supports four action types per item:
+     * 每个项支持四种操作类型：
      * <ul>
-     *   <li>{@code put} — insert or replace an item</li>
-     *   <li>{@code update} — expression-based update</li>
-     *   <li>{@code delete} — remove an item</li>
-     *   <li>{@code conditionCheck} — validate a condition without modifying data</li>
+     *   <li>{@code put} — insert or replace an item / 插入或替换项</li>
+     *   <li>{@code update} — expression-based update / 基于表达式的更新</li>
+     *   <li>{@code delete} — remove an item / 删除项</li>
+     *   <li>{@code conditionCheck} — validate a condition without modifying data / 验证条件但不修改数据</li>
      * </ul>
      */
     public class TransactWriteBuilder {
@@ -103,9 +118,11 @@ public class TransactionOperation {
 
         /**
          * Adds a Put action to the transaction.
+         * 向事务添加 Put 操作。
          *
-         * @param entity the entity to put
-         * @return this builder
+         * @param entity the entity to put / 要放入的实体
+         * @param <T>    the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactWriteBuilder put(T entity) {
             return put(entity, null);
@@ -113,10 +130,12 @@ public class TransactionOperation {
 
         /**
          * Adds a Put action with a condition expression.
+         * 向事务添加带条件表达式的 Put 操作。
          *
-         * @param entity    the entity to put
-         * @param condition the condition that must be met (nullable)
-         * @return this builder
+         * @param entity    the entity to put / 要放入的实体
+         * @param condition the condition that must be met (nullable) / 必须满足的条件（可为 null）
+         * @param <T>       the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactWriteBuilder put(T entity, ConditionExpression condition) {
             Class<?> entityClass = entity.getClass();
@@ -139,14 +158,17 @@ public class TransactionOperation {
 
         /**
          * Adds an expression-based Update action to the transaction.
+         * 向事务添加基于表达式的 Update 操作。
          * <p>
          * The configurator receives an {@link TransactUpdateBuilder} to build
          * the update expression with SET/REMOVE/ADD/DELETE clauses and conditions.
+         * configurator 接收 {@link TransactUpdateBuilder} 以构建包含 SET/REMOVE/ADD/DELETE 子句和条件的更新表达式。
          *
-         * @param clazz        the entity class
-         * @param partitionKey the partition key value
-         * @param configurator callback to configure the update expression
-         * @return this builder
+         * @param clazz        the entity class / 实体类
+         * @param partitionKey the partition key value / 分区键值
+         * @param configurator callback to configure the update expression / 用于配置更新表达式的回调
+         * @param <T>          the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactWriteBuilder update(Class<T> clazz, Object partitionKey,
                                                 Consumer<TransactUpdateBuilder> configurator) {
@@ -155,12 +177,14 @@ public class TransactionOperation {
 
         /**
          * Adds an expression-based Update action with composite key.
+         * 向事务添加带复合键的基于表达式的 Update 操作。
          *
-         * @param clazz        the entity class
-         * @param partitionKey the partition key value
-         * @param sortKey      the sort key value (nullable)
-         * @param configurator callback to configure the update expression
-         * @return this builder
+         * @param clazz        the entity class / 实体类
+         * @param partitionKey the partition key value / 分区键值
+         * @param sortKey      the sort key value (nullable) / 排序键值（可为 null）
+         * @param configurator callback to configure the update expression / 用于配置更新表达式的回调
+         * @param <T>          the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactWriteBuilder update(Class<T> clazz, Object partitionKey, Object sortKey,
                                                 Consumer<TransactUpdateBuilder> configurator) {
@@ -178,10 +202,12 @@ public class TransactionOperation {
 
         /**
          * Adds a Delete action to the transaction.
+         * 向事务添加 Delete 操作。
          *
-         * @param clazz        the entity class
-         * @param partitionKey the partition key value
-         * @return this builder
+         * @param clazz        the entity class / 实体类
+         * @param partitionKey the partition key value / 分区键值
+         * @param <T>          the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactWriteBuilder delete(Class<T> clazz, Object partitionKey) {
             return delete(clazz, partitionKey, null, null);
@@ -189,11 +215,13 @@ public class TransactionOperation {
 
         /**
          * Adds a Delete action with composite key.
+         * 向事务添加带复合键的 Delete 操作。
          *
-         * @param clazz        the entity class
-         * @param partitionKey the partition key value
-         * @param sortKey      the sort key value
-         * @return this builder
+         * @param clazz        the entity class / 实体类
+         * @param partitionKey the partition key value / 分区键值
+         * @param sortKey      the sort key value / 排序键值
+         * @param <T>          the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactWriteBuilder delete(Class<T> clazz, Object partitionKey, Object sortKey) {
             return delete(clazz, partitionKey, sortKey, null);
@@ -201,12 +229,14 @@ public class TransactionOperation {
 
         /**
          * Adds a Delete action with condition expression.
+         * 向事务添加带条件表达式的 Delete 操作。
          *
-         * @param clazz        the entity class
-         * @param partitionKey the partition key value
-         * @param sortKey      the sort key value (nullable)
-         * @param condition    the condition expression (nullable)
-         * @return this builder
+         * @param clazz        the entity class / 实体类
+         * @param partitionKey the partition key value / 分区键值
+         * @param sortKey      the sort key value (nullable) / 排序键值（可为 null）
+         * @param condition    the condition expression (nullable) / 条件表达式（可为 null）
+         * @param <T>          the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactWriteBuilder delete(Class<T> clazz, Object partitionKey,
                                                 Object sortKey, ConditionExpression condition) {
@@ -228,13 +258,16 @@ public class TransactionOperation {
 
         /**
          * Adds a ConditionCheck action — validates a condition without modifying data.
+         * 添加 ConditionCheck 操作——验证条件但不修改数据。
          * <p>
          * Useful for ensuring preconditions are met before the transaction commits.
+         * 适用于确保事务提交前满足前置条件。
          *
-         * @param clazz        the entity class
-         * @param partitionKey the partition key value
-         * @param condition    the condition that must be satisfied
-         * @return this builder
+         * @param clazz        the entity class / 实体类
+         * @param partitionKey the partition key value / 分区键值
+         * @param condition    the condition that must be satisfied / 必须满足的条件
+         * @param <T>          the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactWriteBuilder conditionCheck(Class<T> clazz, Object partitionKey,
                                                         ConditionExpression condition) {
@@ -243,12 +276,14 @@ public class TransactionOperation {
 
         /**
          * Adds a ConditionCheck action with composite key.
+         * 添加带复合键的 ConditionCheck 操作。
          *
-         * @param clazz        the entity class
-         * @param partitionKey the partition key value
-         * @param sortKey      the sort key value (nullable)
-         * @param condition    the condition that must be satisfied
-         * @return this builder
+         * @param clazz        the entity class / 实体类
+         * @param partitionKey the partition key value / 分区键值
+         * @param sortKey      the sort key value (nullable) / 排序键值（可为 null）
+         * @param condition    the condition that must be satisfied / 必须满足的条件
+         * @param <T>          the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactWriteBuilder conditionCheck(Class<T> clazz, Object partitionKey,
                                                         Object sortKey, ConditionExpression condition) {
@@ -280,12 +315,14 @@ public class TransactionOperation {
 
         /**
          * Sets a client request token for idempotency.
+         * 设置客户端请求令牌以实现幂等性。
          * <p>
          * If the same token is used within 10 minutes, DynamoDB returns the
          * previous result without re-executing the transaction.
+         * 如果在 10 分钟内使用相同的令牌，DynamoDB 将返回之前的结果而不重新执行事务。
          *
-         * @param token the idempotency token
-         * @return this builder
+         * @param token the idempotency token / 幂等性令牌
+         * @return this builder / 当前构建器
          */
         public TransactWriteBuilder idempotencyToken(String token) {
             this.clientRequestToken = token;
@@ -296,10 +333,11 @@ public class TransactionOperation {
 
         /**
          * Executes the transaction. All items succeed or none are applied.
+         * 执行事务。所有项要么全部成功，要么全部不生效。
          *
-         * @throws DynamoTransactionException if the transaction is cancelled
-         * @throws DynamoConditionFailedException if a condition check fails
-         * @throws DynamoException if the transaction fails for other reasons
+         * @throws DynamoTransactionException if the transaction is cancelled / 事务被取消时抛出
+         * @throws DynamoConditionFailedException if a condition check fails / 条件检查失败时抛出
+         * @throws DynamoException if the transaction fails for other reasons / 事务因其他原因失败时抛出
          */
         public void execute() {
             if (items.isEmpty()) {
@@ -389,6 +427,9 @@ public class TransactionOperation {
      * Builder for constructing an Update action within a transaction.
      * Mirrors the expression capabilities of {@link ExpressionUpdateOperation.ExpressionUpdateBuilder}
      * but produces a DynamoDB {@link Update} object for use in transactions.
+     * 用于在事务中构建 Update 操作的构建器。
+     * 镜像 {@link ExpressionUpdateOperation.ExpressionUpdateBuilder} 的表达式能力，
+     * 但生成用于事务的 DynamoDB {@link Update} 对象。
      */
     public static class TransactUpdateBuilder {
         private final EntityMetadata metadata;
@@ -409,11 +450,26 @@ public class TransactionOperation {
             this.sortKey = sortKey;
         }
 
+        /**
+         * Adds a raw SET clause.
+         * 添加原始 SET 子句。
+         *
+         * @param setExpression the SET expression fragment / SET 表达式片段
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder set(String setExpression) {
             setClauses.add(setExpression);
             return this;
         }
 
+        /**
+         * Convenience: SET a single attribute to a value.
+         * 便捷方法：将单个属性设置为指定值。
+         *
+         * @param attributeName the DynamoDB attribute name / DynamoDB 属性名
+         * @param value         the Java value (auto-converted) / Java 值（自动转换）
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder set(String attributeName, Object value) {
             String nameAlias = "#sa" + setClauses.size();
             String valueAlias = ":sv" + setClauses.size();
@@ -423,6 +479,14 @@ public class TransactionOperation {
             return this;
         }
 
+        /**
+         * Atomic increment. Generates {@code SET #attr = #attr + :val}.
+         * 原子递增。生成 {@code SET #attr = #attr + :val}。
+         *
+         * @param attributeName the DynamoDB attribute name / DynamoDB 属性名
+         * @param amount        the amount to add / 要增加的数量
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder increment(String attributeName, Number amount) {
             String nameAlias = "#inc" + setClauses.size();
             String valueAlias = ":inc" + setClauses.size();
@@ -432,6 +496,14 @@ public class TransactionOperation {
             return this;
         }
 
+        /**
+         * Atomic decrement. Generates {@code SET #attr = #attr - :val}.
+         * 原子递减。生成 {@code SET #attr = #attr - :val}。
+         *
+         * @param attributeName the DynamoDB attribute name / DynamoDB 属性名
+         * @param amount        the positive amount to subtract / 要减去的正数数量
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder decrement(String attributeName, Number amount) {
             String nameAlias = "#dec" + setClauses.size();
             String valueAlias = ":dec" + setClauses.size();
@@ -441,6 +513,13 @@ public class TransactionOperation {
             return this;
         }
 
+        /**
+         * Adds a REMOVE clause for one or more attributes.
+         * 为一个或多个属性添加 REMOVE 子句。
+         *
+         * @param attributeNames the attribute names to remove / 要移除的属性名
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder remove(String... attributeNames) {
             for (String attr : attributeNames) {
                 String nameAlias = "#rm" + removeClauses.size();
@@ -450,6 +529,14 @@ public class TransactionOperation {
             return this;
         }
 
+        /**
+         * Adds an ADD clause for a number or set attribute.
+         * 为数字或集合属性添加 ADD 子句。
+         *
+         * @param attributeName the attribute name / 属性名
+         * @param value         the value to add / 要添加的值
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder add(String attributeName, Object value) {
             String nameAlias = "#ad" + addClauses.size();
             String valueAlias = ":ad" + addClauses.size();
@@ -459,31 +546,77 @@ public class TransactionOperation {
             return this;
         }
 
+        /**
+         * Adds an expression attribute name mapping.
+         * 添加表达式属性名映射。
+         *
+         * @param placeholder   the placeholder (e.g. "#status") / 占位符（例如 "#status"）
+         * @param attributeName the actual attribute name / 实际属性名
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder name(String placeholder, String attributeName) {
             expressionNames.put(placeholder, attributeName);
             return this;
         }
 
+        /**
+         * Adds an expression attribute value with auto-conversion.
+         * 添加表达式属性值，自动转换类型。
+         *
+         * @param placeholder the placeholder (e.g. ":amount") / 占位符（例如 ":amount"）
+         * @param val         the Java value / Java 值
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder value(String placeholder, Object val) {
             expressionValues.put(placeholder, AttributeValues.of(val));
             return this;
         }
 
+        /**
+         * Adds a raw AttributeValue expression value.
+         * 添加原始 AttributeValue 表达式值。
+         *
+         * @param placeholder    the placeholder / 占位符
+         * @param attributeValue the raw AttributeValue / 原始 AttributeValue
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder rawValue(String placeholder, AttributeValue attributeValue) {
             expressionValues.put(placeholder, attributeValue);
             return this;
         }
 
+        /**
+         * Sets a pre-built condition expression.
+         * 设置预构建的条件表达式。
+         *
+         * @param condition the condition expression / 条件表达式
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder condition(ConditionExpression condition) {
             this.conditionExpression = condition;
             return this;
         }
 
+        /**
+         * Sets a simple condition expression string.
+         * 设置简单的条件表达式字符串。
+         *
+         * @param expression the condition expression string / 条件表达式字符串
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder condition(String expression) {
             this.conditionExpression = ConditionExpression.of(expression);
             return this;
         }
 
+        /**
+         * Sets a condition expression with a builder callback for names/values.
+         * 设置条件表达式，通过构建器回调配置名称/值。
+         *
+         * @param expression   the condition expression string / 条件表达式字符串
+         * @param configurator callback to configure names and values / 用于配置名称和值的回调
+         * @return this builder / 当前构建器
+         */
         public TransactUpdateBuilder condition(String expression,
                                                 Consumer<ConditionExpression.Builder> configurator) {
             ConditionExpression.Builder builder = ConditionExpression.builder().expression(expression);
@@ -549,9 +682,11 @@ public class TransactionOperation {
 
     /**
      * Fluent builder for constructing DynamoDB TransactGetItems requests.
+     * 用于构建 DynamoDB TransactGetItems 请求的流式构建器。
      * <p>
      * Reads up to 100 items atomically — guarantees a consistent snapshot
      * across all items at the time of the read.
+     * 原子性地读取最多 100 个项——保证读取时所有项的一致性快照。
      *
      * <pre>{@code
      * TransactGetResult result = ddm.transactGet()
@@ -571,10 +706,12 @@ public class TransactionOperation {
 
         /**
          * Adds a Get action by partition key.
+         * 通过分区键添加 Get 操作。
          *
-         * @param clazz        the entity class
-         * @param partitionKey the partition key value
-         * @return this builder
+         * @param clazz        the entity class / 实体类
+         * @param partitionKey the partition key value / 分区键值
+         * @param <T>          the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactGetBuilder get(Class<T> clazz, Object partitionKey) {
             return get(clazz, partitionKey, null);
@@ -582,11 +719,13 @@ public class TransactionOperation {
 
         /**
          * Adds a Get action by composite key.
+         * 通过复合键添加 Get 操作。
          *
-         * @param clazz        the entity class
-         * @param partitionKey the partition key value
-         * @param sortKey      the sort key value (nullable)
-         * @return this builder
+         * @param clazz        the entity class / 实体类
+         * @param partitionKey the partition key value / 分区键值
+         * @param sortKey      the sort key value (nullable) / 排序键值（可为 null）
+         * @param <T>          the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactGetBuilder get(Class<T> clazz, Object partitionKey, Object sortKey) {
             metadataRegistry.register(clazz);
@@ -605,12 +744,14 @@ public class TransactionOperation {
 
         /**
          * Adds a Get action with projection (only return specific attributes).
+         * 添加带投影的 Get 操作（仅返回特定属性）。
          *
-         * @param clazz               the entity class
-         * @param partitionKey         the partition key value
-         * @param sortKey              the sort key value (nullable)
-         * @param projectionExpression the projection expression
-         * @return this builder
+         * @param clazz               the entity class / 实体类
+         * @param partitionKey         the partition key value / 分区键值
+         * @param sortKey              the sort key value (nullable) / 排序键值（可为 null）
+         * @param projectionExpression the projection expression / 投影表达式
+         * @param <T>                  the entity type / 实体类型
+         * @return this builder / 当前构建器
          */
         public <T> TransactGetBuilder get(Class<T> clazz, Object partitionKey, Object sortKey,
                                            String projectionExpression) {
@@ -633,9 +774,10 @@ public class TransactionOperation {
 
         /**
          * Executes the transactional get. Returns a consistent snapshot of all items.
+         * 执行事务性读取。返回所有项的一致性快照。
          *
-         * @return the transaction get result
-         * @throws DynamoTransactionException if the transaction fails
+         * @return the transaction get result / 事务读取结果
+         * @throws DynamoTransactionException if the transaction fails / 事务失败时抛出
          */
         public TransactGetResult execute() {
             if (getItems.isEmpty()) {
@@ -683,6 +825,7 @@ public class TransactionOperation {
     /**
      * Result of a TransactGetItems operation. Items are returned in the same
      * order as they were added to the builder.
+     * TransactGetItems 操作的结果。项按添加到构建器的顺序返回。
      */
     public static class TransactGetResult {
         private final List<Map<String, AttributeValue>> rawItems;
@@ -699,10 +842,12 @@ public class TransactionOperation {
 
         /**
          * Gets the item at the specified index, converted to the expected entity type.
+         * 获取指定索引处的项，转换为期望的实体类型。
          *
-         * @param index the 0-based index (same order as builder calls)
-         * @param clazz the expected entity class
-         * @return the entity, or null if the item was not found
+         * @param index the 0-based index (same order as builder calls) / 从 0 开始的索引（与构建器调用顺序一致）
+         * @param clazz the expected entity class / 期望的实体类
+         * @param <T>   the entity type / 实体类型
+         * @return the entity, or null if the item was not found / 实体，未找到时返回 null
          */
         @SuppressWarnings("unchecked")
         public <T> T get(int index, Class<T> clazz) {
@@ -719,6 +864,9 @@ public class TransactionOperation {
 
         /**
          * Returns the number of items in the result.
+         * 返回结果中的项数。
+         *
+         * @return the number of items / 项数
          */
         public int size() {
             return rawItems.size();

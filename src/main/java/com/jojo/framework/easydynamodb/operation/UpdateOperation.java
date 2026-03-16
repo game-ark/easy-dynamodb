@@ -22,11 +22,15 @@ import java.util.function.Consumer;
 
 /**
  * Handles partial and full update operations using DynamoDB UpdateExpression.
+ * 处理使用 DynamoDB UpdateExpression 的部分更新和全量更新操作。
  * <p>
  * Supports both SET (assign value) and REMOVE (delete attribute) expressions.
  * In partial update mode, a change-tracking proxy detects which fields the
  * mutator touched — including fields explicitly set to {@code null}, which
  * generates a REMOVE expression to delete the attribute from DynamoDB.
+ * 支持 SET（赋值）和 REMOVE（删除属性）表达式。在部分更新模式下，变更追踪代理检测
+ * mutator 修改了哪些字段——包括显式设置为 {@code null} 的字段，这会生成 REMOVE 表达式
+ * 以从 DynamoDB 中删除该属性。
  */
 public class UpdateOperation {
 
@@ -37,10 +41,25 @@ public class UpdateOperation {
     private final MetadataRegistry metadataRegistry;
     private final Executor executor;
 
+    /**
+     * Constructs an UpdateOperation with the default virtual-thread executor.
+     * 使用默认虚拟线程执行器构造 UpdateOperation。
+     *
+     * @param dynamoDbClient   the DynamoDB client / DynamoDB 客户端
+     * @param metadataRegistry the metadata registry / 元数据注册中心
+     */
     public UpdateOperation(DynamoDbClient dynamoDbClient, MetadataRegistry metadataRegistry) {
         this(dynamoDbClient, metadataRegistry, DEFAULT_EXECUTOR);
     }
 
+    /**
+     * Constructs an UpdateOperation with a custom executor.
+     * 使用自定义执行器构造 UpdateOperation。
+     *
+     * @param dynamoDbClient   the DynamoDB client / DynamoDB 客户端
+     * @param metadataRegistry the metadata registry / 元数据注册中心
+     * @param executor         the executor for parallel batch updates (nullable, defaults to virtual threads) / 用于并行批量更新的执行器（可为 null，默认使用虚拟线程）
+     */
     public UpdateOperation(DynamoDbClient dynamoDbClient, MetadataRegistry metadataRegistry, Executor executor) {
         this.dynamoDbClient = dynamoDbClient;
         this.metadataRegistry = metadataRegistry;
@@ -51,6 +70,12 @@ public class UpdateOperation {
      * Partial update: creates a clean entity, tracks which fields the mutator
      * touches (including explicit null assignments), then sends SET for non-null
      * values and REMOVE for null values.
+     * 部分更新：创建一个干净的实体，追踪 mutator 修改了哪些字段（包括显式设置为 null），
+     * 然后对非 null 值发送 SET，对 null 值发送 REMOVE。
+     *
+     * @param entity  the entity (must contain valid primary key values) / 实体（必须包含有效的主键值）
+     * @param mutator the mutation to apply / 要应用的变更操作
+     * @param <T>     the entity type / 实体类型
      */
     @SuppressWarnings("unchecked")
     public <T> void update(T entity, Consumer<T> mutator) {
@@ -59,8 +84,10 @@ public class UpdateOperation {
 
     /**
      * Partial update with a condition expression.
+     * 带条件表达式的部分更新。
      * <p>
      * The condition must evaluate to true for the update to succeed.
+     * 条件必须为 true 才能更新成功。
      *
      * <pre>{@code
      * // Update coins only if current value matches (optimistic locking)
@@ -72,10 +99,11 @@ public class UpdateOperation {
      *         .build());
      * }</pre>
      *
-     * @param entity    the entity (must contain valid primary key values)
-     * @param mutator   the mutation to apply
-     * @param condition the condition expression (nullable)
-     * @throws DynamoConditionFailedException if the condition evaluates to false
+     * @param entity    the entity (must contain valid primary key values) / 实体（必须包含有效的主键值）
+     * @param mutator   the mutation to apply / 要应用的变更操作
+     * @param condition the condition expression (nullable) / 条件表达式（可为 null）
+     * @param <T>       the entity type / 实体类型
+     * @throws DynamoConditionFailedException if the condition evaluates to false / 条件不满足时抛出
      */
     @SuppressWarnings("unchecked")
     public <T> void update(T entity, Consumer<T> mutator, ConditionExpression condition) {
@@ -128,6 +156,10 @@ public class UpdateOperation {
     /**
      * Full update: iterates all non-key fields of the given entity.
      * Non-null fields become SET expressions; null fields become REMOVE expressions.
+     * 全量更新：遍历给定实体的所有非键字段。非 null 字段生成 SET 表达式；null 字段生成 REMOVE 表达式。
+     *
+     * @param entity the entity to fully update / 要全量更新的实体
+     * @param <T>    the entity type / 实体类型
      */
     public <T> void updateAll(T entity) {
         updateAll(entity, null);
@@ -135,10 +167,12 @@ public class UpdateOperation {
 
     /**
      * Full update with a condition expression.
+     * 带条件表达式的全量更新。
      *
-     * @param entity    the entity to fully update
-     * @param condition the condition expression (nullable)
-     * @throws DynamoConditionFailedException if the condition evaluates to false
+     * @param entity    the entity to fully update / 要全量更新的实体
+     * @param condition the condition expression (nullable) / 条件表达式（可为 null）
+     * @param <T>       the entity type / 实体类型
+     * @throws DynamoConditionFailedException if the condition evaluates to false / 条件不满足时抛出
      */
     public <T> void updateAll(T entity, ConditionExpression condition) {
         Class<?> entityClass = entity.getClass();
@@ -152,9 +186,12 @@ public class UpdateOperation {
      * Batch update: applies the same mutator to each entity and sends individual
      * UpdateItem requests. DynamoDB does not support batch UpdateItem natively,
      * so this method parallelizes individual updates using virtual threads.
+     * 批量更新：对每个实体应用相同的 mutator 并发送单独的 UpdateItem 请求。
+     * DynamoDB 原生不支持批量 UpdateItem，因此此方法使用虚拟线程并行化单独的更新。
      *
-     * @param entities the entities to update (must contain valid primary key values)
-     * @param mutator  the mutation to apply to each entity
+     * @param entities the entities to update (must contain valid primary key values) / 要更新的实体列表（必须包含有效的主键值）
+     * @param mutator  the mutation to apply to each entity / 要应用到每个实体的变更操作
+     * @param <T>      the entity type / 实体类型
      */
     @SuppressWarnings("unchecked")
     public <T> void updateBatch(List<T> entities, Consumer<T> mutator) {
@@ -163,8 +200,10 @@ public class UpdateOperation {
 
     /**
      * Batch full update: sends updateAll for each entity in parallel.
+     * 批量全量更新：并行对每个实体执行 updateAll。
      *
-     * @param entities the entities to fully update
+     * @param entities the entities to fully update / 要全量更新的实体列表
+     * @param <T>      the entity type / 实体类型
      */
     public <T> void updateAllBatch(List<T> entities) {
         executeBatchUpdate(entities, this::updateAll, "full");

@@ -18,6 +18,7 @@ import java.util.Map;
 /**
  * Handles delete operations: single delete by key, and conditional delete
  * via query-then-delete (scan + filter → batch delete, returns count).
+ * 处理删除操作：按键单条删除，以及通过查询后删除（扫描 + 过滤 → 批量删除，返回删除数量）的条件删除。
  */
 public class DeleteOperation {
 
@@ -28,21 +29,46 @@ public class DeleteOperation {
     private final DynamoDbClient dynamoDbClient;
     private final MetadataRegistry metadataRegistry;
 
+    /**
+     * Constructs a DeleteOperation.
+     * 构造 DeleteOperation。
+     *
+     * @param dynamoDbClient   the DynamoDB client / DynamoDB 客户端
+     * @param metadataRegistry the metadata registry / 元数据注册中心
+     */
     public DeleteOperation(DynamoDbClient dynamoDbClient, MetadataRegistry metadataRegistry) {
         this.dynamoDbClient = dynamoDbClient;
         this.metadataRegistry = metadataRegistry;
     }
 
+    /**
+     * Deletes a single entity by partition key only.
+     * 仅通过分区键删除单个实体。
+     *
+     * @param clazz        the entity class / 实体类
+     * @param partitionKey the partition key value / 分区键值
+     * @param <T>          the entity type / 实体类型
+     */
     public <T> void delete(Class<T> clazz, Object partitionKey) {
         delete(clazz, partitionKey, null, null);
     }
 
+    /**
+     * Deletes a single entity by partition key and sort key.
+     * 通过分区键和排序键删除单个实体。
+     *
+     * @param clazz        the entity class / 实体类
+     * @param partitionKey the partition key value / 分区键值
+     * @param sortKey      the sort key value / 排序键值
+     * @param <T>          the entity type / 实体类型
+     */
     public <T> void delete(Class<T> clazz, Object partitionKey, Object sortKey) {
         delete(clazz, partitionKey, sortKey, null);
     }
 
     /**
      * Deletes a single entity with a condition expression.
+     * 删除单个实体，支持条件表达式。
      *
      * <pre>{@code
      * // Delete only if status is "INACTIVE"
@@ -54,11 +80,12 @@ public class DeleteOperation {
      *         .build());
      * }</pre>
      *
-     * @param clazz        the entity class
-     * @param partitionKey the partition key value
-     * @param sortKey      the sort key value (nullable)
-     * @param condition    the condition expression (nullable)
-     * @throws DynamoConditionFailedException if the condition evaluates to false
+     * @param clazz        the entity class / 实体类
+     * @param partitionKey the partition key value / 分区键值
+     * @param sortKey      the sort key value (nullable) / 排序键值（可为 null）
+     * @param condition    the condition expression (nullable) / 条件表达式（可为 null）
+     * @param <T>          the entity type / 实体类型
+     * @throws DynamoConditionFailedException if the condition evaluates to false / 条件不满足时抛出
      */
     public <T> void delete(Class<T> clazz, Object partitionKey, Object sortKey, ConditionExpression condition) {
         metadataRegistry.register(clazz);
@@ -101,15 +128,18 @@ public class DeleteOperation {
     /**
      * Deletes all items matching a condition by scanning with a filter expression,
      * extracting keys, and batch-deleting them. Returns the number of items deleted.
+     * 通过扫描过滤表达式匹配的所有项，提取键并批量删除。返回已删除的项数。
      * <p>
      * DynamoDB does not support "DELETE WHERE condition" natively, so this method
      * performs a scan → extract keys → batch delete loop internally.
+     * DynamoDB 原生不支持 "DELETE WHERE condition"，因此此方法内部执行 扫描 → 提取键 → 批量删除 循环。
      *
-     * @param clazz            the entity class
-     * @param filterExpression the filter expression (e.g. "rating < :minRating")
-     * @param expressionValues the expression attribute values
-     * @param expressionNames  the expression attribute names (nullable)
-     * @return the number of items successfully deleted
+     * @param clazz            the entity class / 实体类
+     * @param filterExpression the filter expression (e.g. "rating < :minRating") / 过滤表达式（例如 "rating < :minRating"）
+     * @param expressionValues the expression attribute values / 表达式属性值
+     * @param expressionNames  the expression attribute names (nullable) / 表达式属性名（可为 null）
+     * @param <T>              the entity type / 实体类型
+     * @return the number of items successfully deleted / 成功删除的项数
      */
     public <T> int deleteByCondition(Class<T> clazz,
                                      String filterExpression,

@@ -20,10 +20,13 @@ import java.util.concurrent.Executors;
 /**
  * Handles batch save and batch get operations with automatic chunking,
  * parallel execution, and exponential backoff retry for unprocessed items.
+ * 处理批量保存和批量获取操作，支持自动分块、并行执行以及对未处理项的指数退避重试。
  * <p>
  * Uses a dedicated virtual-thread executor by default to avoid polluting
  * {@code ForkJoinPool.commonPool()}. A custom {@link Executor} can be
  * supplied via the constructor for full control over thread scheduling.
+ * 默认使用专用虚拟线程执行器，避免污染 {@code ForkJoinPool.commonPool()}。
+ * 可通过构造函数提供自定义 {@link Executor} 以完全控制线程调度。
  */
 public class BatchOperation {
 
@@ -43,6 +46,15 @@ public class BatchOperation {
     private final GetOperation getOperation;
     private final Executor executor;
 
+    /**
+     * Constructs a BatchOperation with the default virtual-thread executor.
+     * 使用默认虚拟线程执行器构造 BatchOperation。
+     *
+     * @param dynamoDbClient   the DynamoDB client / DynamoDB 客户端
+     * @param metadataRegistry the metadata registry / 元数据注册中心
+     * @param saveOperation    the save operation for entity conversion / 用于实体转换的保存操作
+     * @param getOperation     the get operation for entity conversion / 用于实体转换的获取操作
+     */
     public BatchOperation(DynamoDbClient dynamoDbClient,
                           MetadataRegistry metadataRegistry,
                           SaveOperation saveOperation,
@@ -50,6 +62,16 @@ public class BatchOperation {
         this(dynamoDbClient, metadataRegistry, saveOperation, getOperation, DEFAULT_EXECUTOR);
     }
 
+    /**
+     * Constructs a BatchOperation with a custom executor.
+     * 使用自定义执行器构造 BatchOperation。
+     *
+     * @param dynamoDbClient   the DynamoDB client / DynamoDB 客户端
+     * @param metadataRegistry the metadata registry / 元数据注册中心
+     * @param saveOperation    the save operation for entity conversion / 用于实体转换的保存操作
+     * @param getOperation     the get operation for entity conversion / 用于实体转换的获取操作
+     * @param executor         the executor for parallel batch operations (nullable, defaults to virtual threads) / 用于并行批量操作的执行器（可为 null，默认使用虚拟线程）
+     */
     public BatchOperation(DynamoDbClient dynamoDbClient,
                           MetadataRegistry metadataRegistry,
                           SaveOperation saveOperation,
@@ -66,6 +88,13 @@ public class BatchOperation {
      * Saves a list of entities in batches of 25, executing chunks in parallel.
      * Retries unprocessed items with exponential backoff (100ms initial, max 3 retries).
      * Throws DynamoBatchException if items remain unprocessed after retries.
+     * 以每批 25 个的方式保存实体列表，并行执行各分块。
+     * 对未处理的项使用指数退避重试（初始 100ms，最多 3 次重试）。
+     * 如果重试后仍有未处理的项，则抛出 DynamoBatchException。
+     *
+     * @param entities the list of entities to save / 要保存的实体列表
+     * @param <T>      the entity type / 实体类型
+     * @throws DynamoBatchException if items remain unprocessed after retries / 重试后仍有未处理项时抛出
      */
     public <T> void saveBatch(List<T> entities) {
         if (entities == null || entities.isEmpty()) {
@@ -112,6 +141,15 @@ public class BatchOperation {
      * Gets a list of entities by their keys in batches of 100, executing chunks in parallel.
      * Retries unprocessed keys with exponential backoff (100ms initial, max 3 retries).
      * Throws DynamoBatchException if keys remain unprocessed after retries.
+     * 以每批 100 个的方式按键获取实体列表，并行执行各分块。
+     * 对未处理的键使用指数退避重试（初始 100ms，最多 3 次重试）。
+     * 如果重试后仍有未处理的键，则抛出 DynamoBatchException。
+     *
+     * @param clazz the entity class / 实体类
+     * @param keys  the list of key pairs (partition key + optional sort key) / 键对列表（分区键 + 可选排序键）
+     * @param <T>   the entity type / 实体类型
+     * @return the list of retrieved entities / 获取到的实体列表
+     * @throws DynamoBatchException if keys remain unprocessed after retries / 重试后仍有未处理键时抛出
      */
     @SuppressWarnings("unchecked")
     public <T> List<T> getBatch(Class<T> clazz, List<KeyPair> keys) {
@@ -160,6 +198,14 @@ public class BatchOperation {
      * Deletes a list of items by their keys in batches of 25, executing chunks in parallel.
      * Retries unprocessed items with exponential backoff (100ms initial, max 3 retries).
      * Throws DynamoBatchException if keys remain unprocessed after retries.
+     * 以每批 25 个的方式按键删除项列表，并行执行各分块。
+     * 对未处理的项使用指数退避重试（初始 100ms，最多 3 次重试）。
+     * 如果重试后仍有未处理的键，则抛出 DynamoBatchException。
+     *
+     * @param clazz the entity class / 实体类
+     * @param keys  the list of key pairs to delete / 要删除的键对列表
+     * @param <T>   the entity type / 实体类型
+     * @throws DynamoBatchException if keys remain unprocessed after retries / 重试后仍有未处理键时抛出
      */
     public <T> void deleteBatch(Class<T> clazz, List<KeyPair> keys) {
         if (keys == null || keys.isEmpty()) {
