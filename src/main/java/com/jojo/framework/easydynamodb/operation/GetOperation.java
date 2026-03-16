@@ -49,18 +49,50 @@ public class GetOperation {
      */
     @SuppressWarnings("unchecked")
     public <T> T get(Class<T> clazz, Object partitionKey, Object sortKey, boolean consistentRead) {
+        return get(clazz, partitionKey, sortKey, consistentRead, null);
+    }
+
+    /**
+     * Get a single entity by key with optional consistent read and projection.
+     * <p>
+     * When a projection expression is specified, only the listed attributes are
+     * returned from DynamoDB, reducing bandwidth and read capacity consumption.
+     * Unmapped fields in the returned entity will be null.
+     *
+     * <pre>{@code
+     * // Only fetch userId, nickName, and level
+     * User user = ddm.get(User.class, "user-001", null, false, "userId, nickName, level");
+     * }</pre>
+     *
+     * @param clazz               the entity class
+     * @param partitionKey        the partition key value
+     * @param sortKey             the sort key value (nullable)
+     * @param consistentRead      true for strongly consistent read
+     * @param projectionExpression the projection expression (nullable — all attributes if null)
+     * @return the entity, or null if not found
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T get(Class<T> clazz, Object partitionKey, Object sortKey,
+                     boolean consistentRead, String projectionExpression) {
         metadataRegistry.register(clazz);
         EntityMetadata metadata = metadataRegistry.getMetadata(clazz);
 
         Map<String, AttributeValue> keyMap = KeyBuilder.buildKeyMap(metadata, partitionKey, sortKey);
-        log.debug("GetItem from table={}, key={}, consistentRead={}", metadata.getTableName(), keyMap, consistentRead);
+        log.debug("GetItem from table={}, key={}, consistentRead={}, projection={}",
+                metadata.getTableName(), keyMap, consistentRead,
+                projectionExpression != null ? projectionExpression : "all");
 
         try {
-            GetItemResponse response = dynamoDbClient.getItem(GetItemRequest.builder()
+            GetItemRequest.Builder requestBuilder = GetItemRequest.builder()
                     .tableName(metadata.getTableName())
                     .key(keyMap)
-                    .consistentRead(consistentRead)
-                    .build());
+                    .consistentRead(consistentRead);
+
+            if (projectionExpression != null && !projectionExpression.isEmpty()) {
+                requestBuilder.projectionExpression(projectionExpression);
+            }
+
+            GetItemResponse response = dynamoDbClient.getItem(requestBuilder.build());
 
             if (!response.hasItem() || response.item().isEmpty()) {
                 log.debug("GetItem returned no item for table={}", metadata.getTableName());

@@ -1,16 +1,16 @@
 package com.jojo.framework.easydynamodb.operation;
 
+import com.jojo.framework.easydynamodb.exception.DynamoConditionFailedException;
 import com.jojo.framework.easydynamodb.exception.DynamoException;
 import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import com.jojo.framework.easydynamodb.metadata.EntityMetadata;
 import com.jojo.framework.easydynamodb.metadata.FieldMetadata;
 import com.jojo.framework.easydynamodb.metadata.MetadataRegistry;
+import com.jojo.framework.easydynamodb.model.ConditionExpression;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
-import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
-import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
-import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.dynamodb.model.*;
 
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -53,21 +53,65 @@ public class SaveOperation {
      * @throws DynamoException if the DynamoDB operation fails
      */
     public void save(Object entity) {
+        save(entity, null);
+    }
+
+    /**
+     * Saves a single entity with a condition expression.
+     * <p>
+     * The condition must evaluate to true for the save to succeed. If the condition
+     * fails, a {@link DynamoConditionFailedException} is thrown.
+     *
+     * <pre>{@code
+     * // Insert only if item doesn't exist
+     * ddm.save(user, ConditionExpression.of("attribute_not_exists(userId)"));
+     *
+     * // Insert only if version matches (optimistic locking)
+     * ddm.save(user, ConditionExpression.builder()
+     *     .expression("#v = :expected")
+     *     .name("#v", "version")
+     *     .value(":expected", 3)
+     *     .build());
+     * }</pre>
+     *
+     * @param entity    the entity to save
+     * @param condition the condition expression (nullable — no condition if null)
+     * @throws DynamoConditionFailedException if the condition evaluates to false
+     * @throws DynamoException if the DynamoDB operation fails
+     */
+    public void save(Object entity, ConditionExpression condition) {
         Class<?> entityClass = entity.getClass();
         metadataRegistry.register(entityClass);
         EntityMetadata metadata = metadataRegistry.getMetadata(entityClass);
 
         Map<String, AttributeValue> item = toAttributeValueMap(entity, metadata);
-        log.debug("PutItem to table={}, attributes={}", metadata.getTableName(), item.size());
+        log.debug("PutItem to table={}, attributes={}, hasCondition={}",
+                metadata.getTableName(), item.size(), condition != null);
 
-        PutItemRequest request = PutItemRequest.builder()
+        PutItemRequest.Builder requestBuilder = PutItemRequest.builder()
                 .tableName(metadata.getTableName())
-                .item(item)
-                .build();
+                .item(item);
+
+        if (condition != null) {
+            requestBuilder.conditionExpression(condition.getExpression());
+            if (!condition.getExpressionNames().isEmpty()) {
+                requestBuilder.expressionAttributeNames(condition.getExpressionNames());
+            }
+            if (!condition.getExpressionValues().isEmpty()) {
+                requestBuilder.expressionAttributeValues(condition.getExpressionValues());
+            }
+        }
+
+        PutItemRequest request = requestBuilder.build();
 
         try {
             dynamoDbClient.putItem(request);
             log.trace("PutItem succeeded for table={}", metadata.getTableName());
+        } catch (ConditionalCheckFailedException e) {
+            log.warn("PutItem condition failed for table={}: {}", metadata.getTableName(), e.getMessage());
+            throw new DynamoConditionFailedException(
+                    "Condition check failed for save on table "
+                            + metadata.getTableName() + ": " + e.getMessage(), e);
         } catch (ResourceNotFoundException e) {
             if (!autoCreateTable) {
                 log.error("Table {} does not exist and autoCreateTable is disabled", metadata.getTableName());

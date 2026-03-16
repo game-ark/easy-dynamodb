@@ -1,10 +1,12 @@
 package com.jojo.framework.easydynamodb.operation;
 
+import com.jojo.framework.easydynamodb.exception.DynamoConditionFailedException;
 import com.jojo.framework.easydynamodb.exception.DynamoException;
 import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import com.jojo.framework.easydynamodb.metadata.EntityMetadata;
 import com.jojo.framework.easydynamodb.metadata.FieldMetadata;
 import com.jojo.framework.easydynamodb.metadata.MetadataRegistry;
+import com.jojo.framework.easydynamodb.model.ConditionExpression;
 import com.jojo.framework.easydynamodb.model.KeyPair;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
@@ -32,22 +34,62 @@ public class DeleteOperation {
     }
 
     public <T> void delete(Class<T> clazz, Object partitionKey) {
-        delete(clazz, partitionKey, null);
+        delete(clazz, partitionKey, null, null);
     }
 
     public <T> void delete(Class<T> clazz, Object partitionKey, Object sortKey) {
+        delete(clazz, partitionKey, sortKey, null);
+    }
+
+    /**
+     * Deletes a single entity with a condition expression.
+     *
+     * <pre>{@code
+     * // Delete only if status is "INACTIVE"
+     * ddm.delete(User.class, "user-001", null,
+     *     ConditionExpression.builder()
+     *         .expression("#status = :expected")
+     *         .name("#status", "status")
+     *         .value(":expected", "INACTIVE")
+     *         .build());
+     * }</pre>
+     *
+     * @param clazz        the entity class
+     * @param partitionKey the partition key value
+     * @param sortKey      the sort key value (nullable)
+     * @param condition    the condition expression (nullable)
+     * @throws DynamoConditionFailedException if the condition evaluates to false
+     */
+    public <T> void delete(Class<T> clazz, Object partitionKey, Object sortKey, ConditionExpression condition) {
         metadataRegistry.register(clazz);
         EntityMetadata metadata = metadataRegistry.getMetadata(clazz);
 
         Map<String, AttributeValue> keyMap = KeyBuilder.buildKeyMap(metadata, partitionKey, sortKey);
-        log.debug("DeleteItem from table={}, key={}", metadata.getTableName(), keyMap);
+        log.debug("DeleteItem from table={}, key={}, hasCondition={}",
+                metadata.getTableName(), keyMap, condition != null);
 
         try {
-            dynamoDbClient.deleteItem(DeleteItemRequest.builder()
+            DeleteItemRequest.Builder builder = DeleteItemRequest.builder()
                     .tableName(metadata.getTableName())
-                    .key(keyMap)
-                    .build());
+                    .key(keyMap);
+
+            if (condition != null) {
+                builder.conditionExpression(condition.getExpression());
+                if (!condition.getExpressionNames().isEmpty()) {
+                    builder.expressionAttributeNames(condition.getExpressionNames());
+                }
+                if (!condition.getExpressionValues().isEmpty()) {
+                    builder.expressionAttributeValues(condition.getExpressionValues());
+                }
+            }
+
+            dynamoDbClient.deleteItem(builder.build());
             log.trace("DeleteItem succeeded for table={}", metadata.getTableName());
+        } catch (ConditionalCheckFailedException e) {
+            log.warn("DeleteItem condition failed for table={}: {}", metadata.getTableName(), e.getMessage());
+            throw new DynamoConditionFailedException(
+                    "Condition check failed for delete on table "
+                            + metadata.getTableName() + ": " + e.getMessage(), e);
         } catch (DynamoDbException e) {
             log.error("DeleteItem failed for table={}: {}", metadata.getTableName(), e.getMessage());
             throw new DynamoException(

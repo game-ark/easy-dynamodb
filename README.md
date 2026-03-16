@@ -20,6 +20,21 @@ List<User> users = ddm.query(User.class)           // Query
     .keyCondition("pk = :pk")
     .value(":pk", "user-001")                      // Auto-converts to AttributeValue
     .executeAll();
+
+// Conditional save (insert only if not exists)
+ddm.save(user, ConditionExpression.of("attribute_not_exists(userId)"));
+
+// Atomic increment
+ddm.expressionUpdate(User.class, "user-001")
+    .increment("coins", 100)
+    .execute();
+
+// Transaction (all-or-nothing)
+ddm.transact()
+    .put(newUser)
+    .update(User.class, "user-001", u -> u.increment("coins", 100))
+    .delete(TempRecord.class, "temp-001")
+    .execute();
 ```
 
 ## Why EasyDynamodb?
@@ -33,6 +48,9 @@ AWS SDK Enhanced Client is powerful but verbose. EasyDynamodb trades some flexib
 | Partial update | Manual UpdateExpression building | `update(entity, mutator)` with auto-diff |
 | Batch operations | Manual chunking + retry | Auto-split, parallel, exponential backoff |
 | Type conversion | BeanTableSchema or manual | Auto-detected, extensible converters |
+| Transactions | Manual TransactWriteItems/GetItems | `transact()` / `transactGet()` fluent builder |
+| Conditional ops | Manual condition expression building | `save(entity, condition)`, `update(entity, mutator, condition)` |
+| Atomic updates | Manual UpdateExpression with SET arithmetic | `expressionUpdate().increment()` / `.decrement()` |
 | Learning curve | Moderate | Minimal — if you know JPA annotations, you're set |
 
 EasyDynamodb is ideal for projects that want DynamoDB without the boilerplate. If you need fine-grained control over every request parameter, the AWS SDK Enhanced Client is the better choice.
@@ -50,7 +68,7 @@ EasyDynamodb is ideal for projects that want DynamoDB without the boilerplate. I
 <dependency>
     <groupId>games.jojocat.framework</groupId>
     <artifactId>easy-dynamodb</artifactId>
-    <version>1.0.1</version>
+    <version>LATEST</version>
 </dependency>
 ```
 
@@ -110,6 +128,15 @@ That's it. No XML, no YAML, no config files.
 | Delete | `deleteBatch(Class, keys)` | Batch delete by keys (25/batch, parallel) |
 | Delete | `deleteByCondition(Class, filter, values)` | Delete by condition, returns count |
 | Delete | `deleteByConditionWithValues(Class, filter, values)` | Delete by condition with auto-converted values |
+| Save | `save(entity, condition)` | Conditional save (e.g. insert only if not exists) |
+| Update | `update(entity, mutator, condition)` | Conditional partial update |
+| Update | `updateAll(entity, condition)` | Conditional full update |
+| Update | `expressionUpdate(Class, pk)` | Expression-based atomic update (increment/decrement/SET/REMOVE/ADD) |
+| Delete | `delete(Class, pk, sk, condition)` | Conditional delete |
+| Transaction | `transact()` | Transaction write builder (put/update/delete/conditionCheck, all-or-nothing) |
+| Transaction | `transactGet()` | Transaction read builder (consistent multi-item snapshot) |
+| Get | `get(Class, pk, sk, consistentRead, projection)` | Get with projection (return specific attributes only) |
+| Advanced | `client()` | Access underlying DynamoDbClient for advanced use cases |
 
 ---
 
@@ -346,6 +373,126 @@ int deleted2 = ddm.deleteByConditionWithValues(Game.class,
 
 `deleteByCondition` internally performs a scan → extract keys → batch delete loop.
 
+### 7. Conditional Operations
+
+Add condition expressions to save, update, and delete operations. If the condition evaluates to false, a `DynamoConditionFailedException` is thrown.
+
+```java
+// Insert only if item doesn't exist (prevent overwrite)
+ddm.save(user, ConditionExpression.of("attribute_not_exists(userId)"));
+
+// Conditional partial update (optimistic locking)
+ddm.update(user, u -> u.setCoins(newCoins),
+    ConditionExpression.builder()
+        .expression("#coins = :expected")
+        .name("#coins", "coins")
+        .value(":expected", oldCoins)
+        .build());
+
+// Conditional full update
+ddm.updateAll(user,
+    ConditionExpression.of("attribute_exists(userId)"));
+
+// Conditional delete
+ddm.delete(User.class, "user-001", null,
+    ConditionExpression.builder()
+        .expression("#status = :expected")
+        .name("#status", "status")
+        .value(":expected", "INACTIVE")
+        .build());
+```
+
+`ConditionExpression` supports two creation styles:
+- `ConditionExpression.of("expression")` — simple expression without attribute names/values
+- `ConditionExpression.builder().expression(...).name(...).value(...).build()` — full builder with auto-converted values
+
+### 8. Expression Updates (Atomic Operations)
+
+For atomic increments, decrements, and raw DynamoDB update expressions that go beyond entity-level diff-based updates:
+
+```java
+// Atomic increment
+ddm.expressionUpdate(User.class, "user-001")
+    .increment("coins", 100)
+    .execute();
+
+// Atomic decrement
+ddm.expressionUpdate(User.class, "user-001")
+    .decrement("energy", 10)
+    .execute();
+
+// Multiple atomic operations in one call
+ddm.expressionUpdate(User.class, "user-001")
+    .increment("exp", 50)
+    .set("lastLoginTime", Instant.now().toString())
+    .remove("tempFlag")
+    .execute();
+
+// Conditional atomic update
+ddm.expressionUpdate(User.class, "user-001")
+    .increment("coins", 100)
+    .condition("#coins >= :min", c -> c
+        .name("#coins", "coins")
+        .value(":min", 0))
+    .execute();
+
+// Initialize counter if not exists, then increment
+ddm.expressionUpdate(User.class, "user-001")
+    .incrementIfNotExists("loginCount", 0, 1)
+    .execute();
+
+// Add elements to a set
+ddm.expressionUpdate(User.class, "user-001")
+    .add("tags", Set.of("vip", "premium"))
+    .execute();
+```
+
+Supported clauses: `set()`, `increment()`, `decrement()`, `incrementIfNotExists()`, `remove()`, `add()`, `deleteFromSet()`, `listAppend()`. All can be combined in a single call.
+
+### 9. Transactions
+
+Transactions guarantee all-or-nothing atomicity across multiple items and tables. Supports up to 100 items per transaction.
+
+```java
+// Transaction write — all succeed or none are applied
+ddm.transact()
+    .put(newUser)
+    .put(newWallet, ConditionExpression.of("attribute_not_exists(userId)"))
+    .update(User.class, "user-001", u -> u
+        .increment("coins", 100)
+        .condition("#coins >= :min", c -> c
+            .name("#coins", "coins")
+            .value(":min", 0)))
+    .delete(TempRecord.class, "temp-001")
+    .conditionCheck(Inventory.class, "user-001", "item-sword",
+        ConditionExpression.builder()
+            .expression("#count >= :required")
+            .name("#count", "count")
+            .value(":required", 1)
+            .build())
+    .idempotencyToken("unique-request-id")
+    .execute();
+```
+
+Transaction write supports four action types:
+- `put(entity)` / `put(entity, condition)` — insert or replace
+- `update(Class, pk, configurator)` — expression-based update (increment/set/remove/etc.)
+- `delete(Class, pk)` / `delete(Class, pk, sk, condition)` — remove item
+- `conditionCheck(Class, pk, condition)` — validate condition without modifying data
+
+```java
+// Transaction read — consistent snapshot across multiple items
+var result = ddm.transactGet()
+    .get(User.class, "user-001")
+    .get(Wallet.class, "user-001")
+    .get(Inventory.class, "user-001", "item-sword")
+    .execute();
+
+User user = result.get(0, User.class);
+Wallet wallet = result.get(1, Wallet.class);
+Inventory inv = result.get(2, Inventory.class);
+```
+
 ---
 
 ## Type Mapping
@@ -427,7 +574,34 @@ RuntimeException
 └── DynamoException                    // Base class for all EasyDynamodb errors
     ├── DynamoConfigException          // Annotation/entity config errors (raised at registration time)
     ├── DynamoConversionException      // Type conversion failures (includes field name, source/target types)
-    └── DynamoBatchException           // Batch partial failures (contains list of individual failures)
+    ├── DynamoBatchException           // Batch partial failures (contains list of individual failures)
+    ├── DynamoConditionFailedException // Condition expression check failed (save/update/delete/transaction)
+    └── DynamoTransactionException     // Transaction failures (contains cancellation reasons per item)
+```
+
+`DynamoConditionFailedException` is thrown when a condition expression evaluates to false:
+
+```java
+try {
+    ddm.save(user, ConditionExpression.of("attribute_not_exists(userId)"));
+} catch (DynamoConditionFailedException e) {
+    // Item already exists — handle conflict
+}
+```
+
+`DynamoTransactionException` is thrown when a transaction fails, with per-item cancellation reasons:
+
+```java
+try {
+    ddm.transact()
+        .put(user)
+        .update(Wallet.class, "user-001", u -> u.increment("balance", 100))
+        .execute();
+} catch (DynamoTransactionException e) {
+    for (String reason : e.getCancellationReasons()) {
+        System.err.println("Reason: " + reason);
+    }
+}
 ```
 
 `DynamoBatchException` provides access to individual failures:
@@ -488,7 +662,11 @@ Yes. EasyDynamodb uses `MethodHandle` to instantiate entities. A public no-arg c
 `@Data` works if it generates standard getters/setters. `@Builder` alone won't work because it typically removes the no-arg constructor — add `@NoArgsConstructor` alongside it.
 
 **Q: Is `save()` an insert or upsert?**
-`save()` maps to DynamoDB `PutItem`, which is an upsert — it overwrites the entire item if the key already exists. There is currently no `saveIfNotExists()` API.
+`save()` maps to DynamoDB `PutItem`, which is an upsert — it overwrites the entire item if the key already exists. To do an insert-only (prevent overwrite), use a condition expression:
+```java
+ddm.save(user, ConditionExpression.of("attribute_not_exists(userId)"));
+```
+If the item already exists, a `DynamoConditionFailedException` is thrown.
 
 **Q: Can I use this with DynamoDB Local for testing?**
 Yes. Point your `DynamoDbClient` to the local endpoint:

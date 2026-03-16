@@ -2,15 +2,15 @@ package com.jojo.framework.easydynamodb.operation;
 
 import com.jojo.framework.easydynamodb.exception.DynamoBatchException;
 import com.jojo.framework.easydynamodb.exception.DynamoBatchException.BatchFailure;
+import com.jojo.framework.easydynamodb.exception.DynamoConditionFailedException;
 import com.jojo.framework.easydynamodb.exception.DynamoException;
 import com.jojo.framework.easydynamodb.logging.DdmLogger;
 import com.jojo.framework.easydynamodb.metadata.EntityMetadata;
 import com.jojo.framework.easydynamodb.metadata.FieldMetadata;
 import com.jojo.framework.easydynamodb.metadata.MetadataRegistry;
+import com.jojo.framework.easydynamodb.model.ConditionExpression;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
-import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
-import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.*;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -54,6 +54,31 @@ public class UpdateOperation {
      */
     @SuppressWarnings("unchecked")
     public <T> void update(T entity, Consumer<T> mutator) {
+        update(entity, mutator, null);
+    }
+
+    /**
+     * Partial update with a condition expression.
+     * <p>
+     * The condition must evaluate to true for the update to succeed.
+     *
+     * <pre>{@code
+     * // Update coins only if current value matches (optimistic locking)
+     * ddm.update(user, u -> u.setCoins(newCoins),
+     *     ConditionExpression.builder()
+     *         .expression("#coins = :expected")
+     *         .name("#coins", "coins")
+     *         .value(":expected", oldCoins)
+     *         .build());
+     * }</pre>
+     *
+     * @param entity    the entity (must contain valid primary key values)
+     * @param mutator   the mutation to apply
+     * @param condition the condition expression (nullable)
+     * @throws DynamoConditionFailedException if the condition evaluates to false
+     */
+    @SuppressWarnings("unchecked")
+    public <T> void update(T entity, Consumer<T> mutator, ConditionExpression condition) {
         Class<?> entityClass = entity.getClass();
         metadataRegistry.register(entityClass);
         EntityMetadata metadata = metadataRegistry.getMetadata(entityClass);
@@ -97,7 +122,7 @@ public class UpdateOperation {
         log.debug("Partial update for {}: changed fields={}", entityClass.getSimpleName(), changedFields);
 
         // 5. Build and send update with SET + REMOVE
-        buildAndSendUpdate(cleanEntity, metadata, changedFields);
+        buildAndSendUpdate(cleanEntity, metadata, changedFields, condition);
     }
 
     /**
@@ -105,11 +130,22 @@ public class UpdateOperation {
      * Non-null fields become SET expressions; null fields become REMOVE expressions.
      */
     public <T> void updateAll(T entity) {
+        updateAll(entity, null);
+    }
+
+    /**
+     * Full update with a condition expression.
+     *
+     * @param entity    the entity to fully update
+     * @param condition the condition expression (nullable)
+     * @throws DynamoConditionFailedException if the condition evaluates to false
+     */
+    public <T> void updateAll(T entity, ConditionExpression condition) {
         Class<?> entityClass = entity.getClass();
         metadataRegistry.register(entityClass);
         EntityMetadata metadata = metadataRegistry.getMetadata(entityClass);
 
-        buildAndSendUpdate(entity, metadata, null);
+        buildAndSendUpdate(entity, metadata, null, condition);
     }
 
     /**
@@ -197,7 +233,8 @@ public class UpdateOperation {
      * only those fields are considered (partial update); when null, all non-key
      * fields are included (full update).
      */
-    private void buildAndSendUpdate(Object entity, EntityMetadata metadata, Set<String> fieldsToInclude) {
+    private void buildAndSendUpdate(Object entity, EntityMetadata metadata,
+                                     Set<String> fieldsToInclude, ConditionExpression condition) {
         Map<String, AttributeValue> keyMap = new HashMap<>();
         Map<String, AttributeValue> expressionValues = new HashMap<>();
         Map<String, String> expressionNames = new HashMap<>();
@@ -249,29 +286,52 @@ public class UpdateOperation {
             updateExpression.append("REMOVE ").append(removeExpression);
         }
 
-        executeUpdate(metadata, keyMap, updateExpression.toString(), expressionNames, expressionValues);
+        executeUpdate(metadata, keyMap, updateExpression.toString(), expressionNames, expressionValues, condition);
     }
 
     private void executeUpdate(EntityMetadata metadata,
                                Map<String, AttributeValue> keyMap,
                                String updateExpression,
                                Map<String, String> expressionNames,
-                               Map<String, AttributeValue> expressionValues) {
-        log.debug("UpdateItem table={}, expression={}", metadata.getTableName(), updateExpression);
+                               Map<String, AttributeValue> expressionValues,
+                               ConditionExpression condition) {
+        log.debug("UpdateItem table={}, expression={}, hasCondition={}",
+                metadata.getTableName(), updateExpression, condition != null);
+
+        // Merge condition expression names/values
+        Map<String, String> allNames = new HashMap<>(expressionNames);
+        Map<String, AttributeValue> allValues = new HashMap<>(expressionValues);
+        if (condition != null) {
+            allNames.putAll(condition.getExpressionNames());
+            allValues.putAll(condition.getExpressionValues());
+        }
+
         try {
             UpdateItemRequest.Builder builder = UpdateItemRequest.builder()
                     .tableName(metadata.getTableName())
                     .key(keyMap)
-                    .updateExpression(updateExpression)
-                    .expressionAttributeNames(expressionNames);
+                    .updateExpression(updateExpression);
+
+            if (!allNames.isEmpty()) {
+                builder.expressionAttributeNames(allNames);
+            }
 
             // DynamoDB rejects empty expressionAttributeValues
-            if (!expressionValues.isEmpty()) {
-                builder.expressionAttributeValues(expressionValues);
+            if (!allValues.isEmpty()) {
+                builder.expressionAttributeValues(allValues);
+            }
+
+            if (condition != null) {
+                builder.conditionExpression(condition.getExpression());
             }
 
             dynamoDbClient.updateItem(builder.build());
             log.trace("UpdateItem succeeded for table={}", metadata.getTableName());
+        } catch (ConditionalCheckFailedException e) {
+            log.warn("UpdateItem condition failed for table={}: {}", metadata.getTableName(), e.getMessage());
+            throw new DynamoConditionFailedException(
+                    "Condition check failed for update on table "
+                            + metadata.getTableName() + ": " + e.getMessage(), e);
         } catch (DynamoDbException e) {
             log.error("UpdateItem failed for table={}: {}", metadata.getTableName(), e.getMessage());
             throw new DynamoException(
